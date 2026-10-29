@@ -1,29 +1,29 @@
 {
- "headline": "20k subscribers, 1,835 at risk \u2013 PKR\u202f547,507 on the line",
+ "headline": "20k Subscribers, 9% at Risk \u2013 PKR\u202f547.5K on the Line",
  "paragraphs": [
-  "We have 20,000 paying subscribers this week and about 1,835 of them (9% of the base) are expected to cancel in the next 30 days, putting PKR\u202f547,507 of monthly revenue at risk [F1, F2, F3].",
-  "The high\u2011risk group is the top 2,000 subscribers (top 10%) and represents PKR\u202f187,604 of revenue at risk; the biggest signals are \u2018watching much less than last week\u2019 (61%), \u2018failed renewals\u2019 (54%), \u2018on a Daily pack\u2019 (41%), \u2018sports series ended\u2019 (39%) and \u2018inactive 5+ days\u2019 (39%) [F4, F5, F6, F7, F8, F9].",
-  "The riskiest plan is Daily with an average churn risk of 12% (PKR\u202f206,377 at risk), the riskiest payment channel is Operator\u202f4 (10% risk, PKR\u202f62,465 at risk) and the riskiest genre is Sports (10% risk, PKR\u202f287,883 at risk); contacting the top 10% by score catches real leavers 28% of the time, 3.01\u00d7 better than random outreach [F10, F11, F12, F13]"
+  "We have 20,000 paying subscribers this week and about 1,835 of them (9% of the base) are expected to cancel in the next 30 days, putting PKR\u202f547,507 of monthly revenue at risk[F1, F2, F3].",
+  "The high\u2011risk group comprises the top 2,000 subscribers (top 10%) and represents PKR\u202f187,604 of revenue at risk; the main signals are watching much less than last week (61%), failed renewals (54%), being on a Daily pack (41%), sports series ending (39%) and inactivity for 5+ days (39%)[F4, F5, F6, F7, F8, F9].",
+  "The riskiest plan is the Daily pack with an average churn risk of 12% and PKR\u202f206,377 at risk, the riskiest payment channel is Operator\u202f4 with 10% risk and PKR\u202f62,465 at risk, and the riskiest genre is Sports with 10% risk and PKR\u202f287,883 at risk; contacting the top 10% by score yields about 28% real leavers, 3.01\u202f\u00d7 better than random outreach[F10, F11, F12, F13]."
  ],
  "actions": [
-  "Contact the top 10% scored subscribers with a personalized win\u2011back message that addresses reduced watching, renewal failures and Daily\u2011pack concerns [F5, F6, F7, F13]",
-  "Send a limited\u2011time sports\u2011bundle discount to users flagged by the Sports genre risk to keep them engaged [F12]",
-  "Promote alternative payment methods to Operator\u202f4 users to reduce the high churn risk on that channel [F11]"
+  "Contact the top\u2011scoring 10% of subscribers this week to intervene early, leveraging the 3.01\u202f\u00d7 higher success rate over random outreach[F13].",
+  "Send targeted retention offers to Daily\u2011pack users, since they represent the riskiest plan with PKR\u202f206,377 at risk[F7, F10].",
+  "Promote fresh sports content and reminders to users flagged for sports\u2011series\u2011ended reasons, addressing the riskiest genre that threatens PKR\u202f287,883 of revenue[F8, F12]."
  ],
  "meta": {
   "mode": "live",
   "model": "openai/gpt-oss-120b",
-  "seconds": 3.3,
-  "input_tokens": 563,
-  "output_tokens": 607,
-  "cost_usd": 0.000449,
+  "seconds": 1.71,
+  "input_tokens": 593,
+  "output_tokens": 594,
+  "cost_usd": 0.000445,
   "price_is_estimate": false,
-  "total_cost_usd": 0.000705
+  "total_cost_usd": 0.000749
  },
  "verification": {
   "sentences": [
    {
-    "sentence": "We have 20,000 paying subscribers this week and about 1,835 of them (9% of the base) are expected to cancel in the next 30 days, putting PKR\u202f547,507 of monthly revenue at risk [F1, F2, F3].",
+    "sentence": "We have 20,000 paying subscribers this week and about 1,835 of them (9% of the base) are expected to cancel in the next 30 days, putting PKR\u202f547,507 of monthly revenue at risk[F1, F2, F3].",
     "cited": [
      "F1",
      "F2",
@@ -38,7 +38,7 @@
     "ok_final": true
    },
    {
-    "sentence": "The high\u2011risk group is the top 2,000 subscribers (top 10%) and represents PKR\u202f187,604 of revenue at risk; the biggest signals are \u2018watching much less than last week\u2019 (61%), \u2018failed renewals\u2019 (54%), \u2018on a Daily pack\u2019 (41%), \u2018sports series ended\u2019 (39%) and \u2018inactive 5+ days\u2019 (39%) [F4, F5, F6, F7, F8, F9].",
+    "sentence": "The high\u2011risk group comprises the top 2,000 subscribers (top 10%) and represents PKR\u202f187,604 of revenue at risk; the main signals are watching much less than last week (61%), failed renewals (54%), being on a Daily pack (41%), sports series ending (39%) and inactivity for 5+ days (39%)[F4, F5, F6, F7, F8, F9].",
     "cited": [
      "F4",
      "F5",
@@ -56,7 +56,7 @@
     "ok_final": true
    },
    {
-    "sentence": "The riskiest plan is Daily with an average churn risk of 12% (PKR\u202f206,377 at risk), the riskiest payment channel is Operator\u202f4 (10% risk, PKR\u202f62,465 at risk) and the riskiest genre is Sports (10% risk, PKR\u202f287,883 at risk); contacting the top 10% by score catches real leavers 28% of the time, 3.01\u00d7 better than random outreach [F10, F11, F12, F13]",
+    "sentence": "The riskiest plan is the Daily pack with an average churn risk of 12% and PKR\u202f206,377 at risk, the riskiest payment channel is Operator\u202f4 with 10% risk and PKR\u202f62,465 at risk, and the riskiest genre is Sports with 10% risk and PKR\u202f287,883 at risk; contacting the top 10% by score yields about 28% real leavers, 3.01\u202f\u00d7 better than random outreach[F10, F11, F12, F13].",
     "cited": [
      "F10",
      "F11",
@@ -72,44 +72,43 @@
     "ok_final": true
    },
    {
-    "sentence": "Contact the top 10% scored subscribers with a personalized win\u2011back message that addresses reduced watching, renewal failures and Daily\u2011pack concerns [F5, F6, F7, F13]",
+    "sentence": "Contact the top\u2011scoring 10% of subscribers this week to intervene early, leveraging the 3.01\u202f\u00d7 higher success rate over random outreach[F13].",
     "cited": [
-     "F5",
-     "F6",
-     "F7",
      "F13"
     ],
     "ok": true,
     "problems": [],
     "judge": {
      "verdict": "faithful",
-     "why": "Recommendation based on F5-F7, F13."
+     "why": "Recommendation based on accurate F13 stats."
     },
     "ok_final": true
    },
    {
-    "sentence": "Send a limited\u2011time sports\u2011bundle discount to users flagged by the Sports genre risk to keep them engaged [F12]",
+    "sentence": "Send targeted retention offers to Daily\u2011pack users, since they represent the riskiest plan with PKR\u202f206,377 at risk[F7, F10].",
     "cited": [
+     "F7",
+     "F10"
+    ],
+    "ok": true,
+    "problems": [],
+    "judge": {
+     "verdict": "faithful",
+     "why": "Recommendation based on accurate F10 stats."
+    },
+    "ok_final": true
+   },
+   {
+    "sentence": "Promote fresh sports content and reminders to users flagged for sports\u2011series\u2011ended reasons, addressing the riskiest genre that threatens PKR\u202f287,883 of revenue[F8, F12].",
+    "cited": [
+     "F8",
      "F12"
     ],
     "ok": true,
     "problems": [],
     "judge": {
      "verdict": "faithful",
-     "why": "Recommendation based on F12."
-    },
-    "ok_final": true
-   },
-   {
-    "sentence": "Promote alternative payment methods to Operator\u202f4 users to reduce the high churn risk on that channel [F11]",
-    "cited": [
-     "F11"
-    ],
-    "ok": true,
-    "problems": [],
-    "judge": {
-     "verdict": "faithful",
-     "why": "Recommendation based on F11."
+     "why": "Recommendation based on accurate F12 stats."
     },
     "ok_final": true
    }
@@ -120,10 +119,10 @@
   "passed": true,
   "judge_meta": {
    "model": "qwen/qwen3.8-27b",
-   "seconds": 0.56,
-   "input_tokens": 1000,
-   "output_tokens": 177,
-   "cost_usd": 0.000256,
+   "seconds": 0.68,
+   "input_tokens": 1022,
+   "output_tokens": 252,
+   "cost_usd": 0.000304,
    "price_is_estimate": true
   },
   "flagged_final": 0,

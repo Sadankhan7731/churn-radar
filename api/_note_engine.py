@@ -65,7 +65,8 @@ def build_facts(d):
 SYSTEM = """You write a short weekly churn note for a retention team at a Pakistani streaming subscription company.
 Rules:
 - Use ONLY the numbered facts given. Never invent numbers, segments, reasons or causes.
-- End every sentence with the fact ids it relies on, like [F2] or [F3, F7].
+- End EVERY sentence with the fact ids it relies on, like [F2] or [F3, F7] - including long sentences
+  that list several items (cite all of their facts, e.g. [F10, F11, F12]).
 - Plain English, no jargon, friendly but direct. Currency is PKR.
 - Return JSON: {"headline": str, "paragraphs": [str, str, str], "actions": [str, str, str]}
   Each action is one concrete thing the team can do this week, also ending with fact ids."""
@@ -151,7 +152,14 @@ def verify_note(note, facts):
             cited += [f"F{i}" for i in range(int(a), int(b) + 1)]
         problems = []
         if not cited:
-            problems.append("no fact cited")
+            # Targeted feedback: work out which facts these numbers came from, so the
+            # repair step can tell the writer exactly which ids to add.
+            nums = [float(x.replace(",", "").rstrip(".")) for x in NUM.findall(s)]
+            big = [n for n in nums if n >= 100] or nums      # large numbers are distinctive fingerprints
+            likely = [f["id"] for f in facts if any(abs(n - a) <= max(0.5, abs(a) * 0.01)
+                                                    for n in big for a in f["numbers"])]
+            problems.append("no fact cited" + (f" (these numbers match {', '.join(likely)}; "
+                                               f"end the sentence with [{', '.join(likely)}])" if likely else ""))
         bad = [c for c in cited if c not in by_id]
         if bad:
             problems.append(f"cites facts that do not exist: {', '.join(bad)}")
