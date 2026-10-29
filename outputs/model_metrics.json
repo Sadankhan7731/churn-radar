@@ -1,0 +1,183 @@
+{
+  "chosen_model": "Logistic regression (baseline)",
+  "results": {
+    "Logistic regression (baseline)": {
+      "auc": 0.743,
+      "precision_top10": 0.277,
+      "recall_top10": 0.301,
+      "lift_top10": 3.01,
+      "brier": 0.0766,
+      "base_rate": 0.092,
+      "top_band_predicted": 0.312,
+      "top_band_actual": 0.277,
+      "calibration": [
+        {
+          "band": 0,
+          "predicted": 0.0139,
+          "actual": 0.0133,
+          "n": 600
+        },
+        {
+          "band": 1,
+          "predicted": 0.0249,
+          "actual": 0.0217,
+          "n": 600
+        },
+        {
+          "band": 2,
+          "predicted": 0.0343,
+          "actual": 0.025,
+          "n": 600
+        },
+        {
+          "band": 3,
+          "predicted": 0.0441,
+          "actual": 0.0583,
+          "n": 600
+        },
+        {
+          "band": 4,
+          "predicted": 0.0557,
+          "actual": 0.06,
+          "n": 600
+        },
+        {
+          "band": 5,
+          "predicted": 0.0691,
+          "actual": 0.0783,
+          "n": 600
+        },
+        {
+          "band": 6,
+          "predicted": 0.0868,
+          "actual": 0.1067,
+          "n": 600
+        },
+        {
+          "band": 7,
+          "predicted": 0.1135,
+          "actual": 0.1183,
+          "n": 600
+        },
+        {
+          "band": 8,
+          "predicted": 0.1591,
+          "actual": 0.1617,
+          "n": 600
+        },
+        {
+          "band": 9,
+          "predicted": 0.3115,
+          "actual": 0.2767,
+          "n": 600
+        }
+      ]
+    },
+    "Gradient boosting": {
+      "auc": 0.734,
+      "precision_top10": 0.285,
+      "recall_top10": 0.31,
+      "lift_top10": 3.1,
+      "brier": 0.0771,
+      "base_rate": 0.092,
+      "top_band_predicted": 0.274,
+      "top_band_actual": 0.285,
+      "calibration": [
+        {
+          "band": 0,
+          "predicted": 0.0213,
+          "actual": 0.0183,
+          "n": 600
+        },
+        {
+          "band": 1,
+          "predicted": 0.0314,
+          "actual": 0.025,
+          "n": 600
+        },
+        {
+          "band": 2,
+          "predicted": 0.04,
+          "actual": 0.0317,
+          "n": 600
+        },
+        {
+          "band": 3,
+          "predicted": 0.0497,
+          "actual": 0.045,
+          "n": 600
+        },
+        {
+          "band": 4,
+          "predicted": 0.0605,
+          "actual": 0.085,
+          "n": 600
+        },
+        {
+          "band": 5,
+          "predicted": 0.0743,
+          "actual": 0.06,
+          "n": 600
+        },
+        {
+          "band": 6,
+          "predicted": 0.09,
+          "actual": 0.1017,
+          "n": 600
+        },
+        {
+          "band": 7,
+          "predicted": 0.1138,
+          "actual": 0.1283,
+          "n": 600
+        },
+        {
+          "band": 8,
+          "predicted": 0.1541,
+          "actual": 0.14,
+          "n": 600
+        },
+        {
+          "band": 9,
+          "predicted": 0.2741,
+          "actual": 0.285,
+          "n": 600
+        }
+      ]
+    }
+  },
+  "targets": {
+    "AUC >= 0.75": false,
+    "Precision top 10% >= 40%": false,
+    "Top band calibrated (within 5 pts)": true
+  },
+  "ceiling": {
+    "auc": 0.783,
+    "precision_top10": 0.348,
+    "recall_top10": 0.379,
+    "lift_top10": 3.79,
+    "brier": 0.0727
+  },
+  "features": {
+    "numeric": [
+      "tenure_days",
+      "watch_min_last_7d",
+      "watch_change_pct",
+      "sessions_7d",
+      "days_since_active",
+      "failed_renewals_30d",
+      "support_tickets_30d",
+      "buffering_errors_7d",
+      "used_discount",
+      "sports_season_over",
+      "monthly_revenue_pkr"
+    ],
+    "categorical": [
+      "payment_channel",
+      "plan",
+      "city",
+      "device",
+      "favourite_genre"
+    ]
+  }
+}

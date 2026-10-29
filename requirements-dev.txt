@@ -1,0 +1,9 @@
+# Only needed on your Mac to run Steps 1-5 and the notebook.
+# The live website needs no packages: api/ uses only Python's standard library.
+numpy<2
+pandas
+scikit-learn
+matplotlib
+nbformat
+nbconvert
+ipykernel

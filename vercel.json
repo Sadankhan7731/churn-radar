@@ -1,0 +1,9 @@
+{
+  "outputDirectory": "public",
+  "functions": {
+    "api/weekly_note.py": {
+      "includeFiles": "{api/_note_engine.py,public/data/dashboard.json}",
+      "maxDuration": 60
+    }
+  }
+}

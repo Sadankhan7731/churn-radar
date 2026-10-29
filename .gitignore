@@ -1,0 +1,12 @@
+# Secrets - never commit these
+.env
+
+# Local Python environment and caches
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
+
+# Personal documents - not part of the public code
+*.docx
+.claude/

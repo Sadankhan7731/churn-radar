@@ -1,0 +1,127 @@
+{
+ "facts": [
+  {
+   "id": "F1",
+   "text": "20,000 paying subscribers were scored this week.",
+   "numbers": [
+    20000.0,
+    20000
+   ]
+  },
+  {
+   "id": "F2",
+   "text": "About 1,835 subscribers are expected to cancel in the next 30 days (9% of the base).",
+   "numbers": [
+    1835.0,
+    30.0,
+    9.0,
+    1835,
+    9
+   ]
+  },
+  {
+   "id": "F3",
+   "text": "Total monthly revenue at risk is PKR 547,507.",
+   "numbers": [
+    547507.0,
+    547507
+   ]
+  },
+  {
+   "id": "F4",
+   "text": "The high-risk group is the top 2,000 subscribers (top 10%), with PKR 187,604 of revenue at risk.",
+   "numbers": [
+    2000.0,
+    10.0,
+    187604.0,
+    2000,
+    10,
+    187604
+   ]
+  },
+  {
+   "id": "F5",
+   "text": "'Watching much less than last week' is a top reason for 61% of the high-risk group.",
+   "numbers": [
+    61.0,
+    61
+   ]
+  },
+  {
+   "id": "F6",
+   "text": "'Failed renewals' is a top reason for 54% of the high-risk group.",
+   "numbers": [
+    54.0,
+    54
+   ]
+  },
+  {
+   "id": "F7",
+   "text": "'On a Daily pack' is a top reason for 41% of the high-risk group.",
+   "numbers": [
+    41.0,
+    41
+   ]
+  },
+  {
+   "id": "F8",
+   "text": "'Sports series ended' is a top reason for 39% of the high-risk group.",
+   "numbers": [
+    39.0,
+    39
+   ]
+  },
+  {
+   "id": "F9",
+   "text": "'Inactive 5+ days' is a top reason for 39% of the high-risk group.",
+   "numbers": [
+    5.0,
+    39.0,
+    39
+   ]
+  },
+  {
+   "id": "F10",
+   "text": "The riskiest plan is Daily: average churn risk 12%, PKR 206,377 at risk.",
+   "numbers": [
+    12.0,
+    206377.0,
+    12,
+    206377
+   ]
+  },
+  {
+   "id": "F11",
+   "text": "The riskiest payment channel is Operator 4: average churn risk 10%, PKR 62,465 at risk.",
+   "numbers": [
+    4.0,
+    10.0,
+    62465.0,
+    10,
+    62465
+   ]
+  },
+  {
+   "id": "F12",
+   "text": "The riskiest genre is Sports: average churn risk 10%, PKR 287,883 at risk.",
+   "numbers": [
+    10.0,
+    287883.0,
+    10,
+    287883
+   ]
+  },
+  {
+   "id": "F13",
+   "text": "If the team contacts the top 10% by score, about 28% of them are real leavers, 3.01 times better than contacting people at random.",
+   "numbers": [
+    10.0,
+    28.0,
+    3.01,
+    10,
+    28,
+    3.01
+   ]
+  }
+ ]
+}

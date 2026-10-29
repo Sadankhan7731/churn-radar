@@ -1,0 +1,266 @@
+"""
+The weekly-note engine, shared by the local script (src/step5_weekly_note.py)
+and the live website (api/weekly_note.py), so both behave exactly the same.
+
+Three parts:
+  1. build_facts()  - turn dashboard numbers into a short list of numbered facts.
+                      ONLY totals and shares: no subscriber IDs, names or numbers.
+                      (Phase 1, row 6b: only aggregated signals leave our systems.)
+  2. ask_llm()      - send the facts to Groq and ask for a plain-English note
+                      that cites a fact number for every sentence.
+  3. verify_note()  - our hallucination check (Phase 1, row 7a): every sentence
+                      must cite real facts, and every number in it must appear
+                      in those facts. Anything else is flagged as unsupported.
+"""
+import json
+import os
+import re
+import time
+import urllib.error
+import urllib.request
+
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+# The model name can be changed without touching code: set GROQ_MODEL in .env or Vercel.
+# (We first used llama-3.3-70b-versatile; Groq had retired it, so we switched.)
+MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+# USD per 1 million tokens (input, output). Estimates - check groq.com/pricing.
+PRICES = {"openai/gpt-oss-120b": (0.15, 0.60), "openai/gpt-oss-20b": (0.075, 0.30)}
+DEFAULT_PRICE = (0.15, 0.60)   # used when a model is not in the table (marked as an estimate)
+
+
+def pct(x):
+    return round(x * 100)
+
+
+def build_facts(d):
+    """Numbered facts the LLM is allowed to use. Each fact lists the numbers it contains."""
+    k, facts = d["kpis"], []
+
+    def add(text, *numbers):
+        # Allowed numbers = every number written in the fact, plus any extras passed in.
+        # (Bug found by our own checker: "30 days" was flagged until we read numbers from the text.)
+        in_text = [float(x.replace(",", "").rstrip(".")) for x in NUM.findall(text)]
+        facts.append({"id": f"F{len(facts) + 1}", "text": text, "numbers": in_text + list(numbers)})
+
+    add(f"{k['subscribers']:,} paying subscribers were scored this week.", k["subscribers"])
+    add(f"About {k['expected_churners']:,} subscribers are expected to cancel in the next 30 days "
+        f"({pct(k['expected_churn_rate'])}% of the base).", k["expected_churners"], pct(k["expected_churn_rate"]))
+    add(f"Total monthly revenue at risk is PKR {k['revenue_at_risk_pkr']:,}.", k["revenue_at_risk_pkr"])
+    add(f"The high-risk group is the top {k['high_risk_subscribers']:,} subscribers (top 10%), "
+        f"with PKR {k['high_risk_revenue_at_risk_pkr']:,} of revenue at risk.",
+        k["high_risk_subscribers"], 10, k["high_risk_revenue_at_risk_pkr"])
+    for r in d["reason_summary"][:5]:
+        add(f"'{r['label']}' is a top reason for {pct(r['share'])}% of the high-risk group.", pct(r["share"]))
+    for col, label in [("plan", "plan"), ("payment_channel", "payment channel"), ("favourite_genre", "genre")]:
+        s = d["segments"][col][0]
+        add(f"The riskiest {label} is {s['segment']}: average churn risk {pct(s['avg_risk'])}%, "
+            f"PKR {int(s['revenue_at_risk_pkr']):,} at risk.", pct(s["avg_risk"]), int(s["revenue_at_risk_pkr"]))
+    m = d["model"]
+    add(f"If the team contacts the top 10% by score, about {pct(m['precision_top10'])}% of them are real "
+        f"leavers, {m['lift_top10']} times better than contacting people at random.",
+        10, pct(m["precision_top10"]), m["lift_top10"])
+    return facts
+
+
+SYSTEM = """You write a short weekly churn note for a retention team at a Pakistani streaming subscription company.
+Rules:
+- Use ONLY the numbered facts given. Never invent numbers, segments, reasons or causes.
+- End every sentence with the fact ids it relies on, like [F2] or [F3, F7].
+- Plain English, no jargon, friendly but direct. Currency is PKR.
+- Return JSON: {"headline": str, "paragraphs": [str, str, str], "actions": [str, str, str]}
+  Each action is one concrete thing the team can do this week, also ending with fact ids."""
+
+
+def _chat(messages, api_key, model, temperature=0.2, max_tokens=900, retries=2):
+    """One call to Groq. Returns (parsed JSON answer, usage info).
+
+    max_tokens matters on Groq's free tier: some models allow only ~1,000 output
+    tokens per minute, and Groq rejects a request that MIGHT exceed that (error 429).
+    """
+    body = {"model": model, "temperature": temperature, "max_completion_tokens": max_tokens,
+            "response_format": {"type": "json_object"}, "messages": messages}
+    if model.startswith("openai/gpt-oss"):
+        body["reasoning_effort"] = "low"   # gpt-oss thinks before answering; low = faster and cheaper
+    req = urllib.request.Request(GROQ_URL, data=json.dumps(body).encode(), headers={
+        "Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
+        "User-Agent": "churn-radar/1.0"})
+    t0 = time.time()
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read())
+            break
+        except urllib.error.HTTPError as e:
+            msg = e.read().decode()[:300]
+            if e.code == 429 and attempt < retries:      # rate limit: wait and try again
+                time.sleep(8 * (attempt + 1))
+                continue
+            raise RuntimeError(f"Groq returned {e.code}: {msg}") from None
+    usage = data.get("usage", {})
+    tin, tout = usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+    price_in, price_out = PRICES.get(model, DEFAULT_PRICE)
+    meta = {"model": model, "seconds": round(time.time() - t0, 2),
+            "input_tokens": tin, "output_tokens": tout,
+            "cost_usd": round(tin / 1e6 * price_in + tout / 1e6 * price_out, 6),
+            "price_is_estimate": model not in PRICES}
+    return json.loads(data["choices"][0]["message"]["content"]), meta
+
+
+def facts_block(facts):
+    return "\n".join(f"{f['id']}: {f['text']}" for f in facts)
+
+
+def ask_llm(facts, api_key, temperature=0.3, feedback=None):
+    msgs = [{"role": "system", "content": SYSTEM},
+            {"role": "user", "content": f"Facts for this week:\n{facts_block(facts)}\n\nWrite the note."}]
+    if feedback:   # self-correction: show the writer its previous draft and what was wrong
+        msgs += [{"role": "assistant", "content": json.dumps(feedback["draft"])},
+                 {"role": "user", "content": "A checker found these problems. Rewrite the whole note, fixing them "
+                                             "and keeping every rule:\n- " + "\n- ".join(feedback["problems"])}]
+    note, meta = _chat(msgs, api_key, MODEL, temperature)
+    note["meta"] = {"mode": "live", **meta}
+    return note
+
+
+def demo_note(facts):
+    """Used when no API key is set: a fixed template filled from the same facts."""
+    t = {f["id"]: f["text"] for f in facts}
+    return {"headline": "Demo mode: template note (no AI key set)",
+            "paragraphs": [f"{t['F2']} [F2]", f"{t['F4']} [F4]", f"{t['F5']} [F5]"],
+            "actions": ["Call the high-risk group first. [F4, F13]"],
+            "meta": {"mode": "demo", "model": "template", "seconds": 0,
+                     "input_tokens": 0, "output_tokens": 0, "cost_usd": 0}}
+
+
+NUM = re.compile(r"\d[\d,]*\.?\d*")
+PRIVATE = re.compile(r"SUB\d{4,}|\b03\d{9}\b|\+92\d{10}")   # subscriber IDs or Pakistani phone numbers
+
+
+def verify_note(note, facts):
+    """Check every sentence. Returns per-sentence results and the unsupported-claim rate."""
+    by_id = {f["id"]: f for f in facts}
+    sentences = []
+    for part in note.get("paragraphs", []) + note.get("actions", []):
+        sentences += [s.strip() for s in re.split(r"(?<=[.!?\]])\s+(?=[A-Z])", part) if s.strip()]
+
+    checked = []
+    for s in sentences:
+        cites = " ".join(re.findall(r"\[([^\]]*)\]", s))
+        cited = re.findall(r"F\d+", cites)
+        for a, b in re.findall(r"F(\d+)\s*[-\u2013\u2011]\s*F(\d+)", cites):   # ranges like F10-F12
+            cited += [f"F{i}" for i in range(int(a), int(b) + 1)]
+        problems = []
+        if not cited:
+            problems.append("no fact cited")
+        bad = [c for c in cited if c not in by_id]
+        if bad:
+            problems.append(f"cites facts that do not exist: {', '.join(bad)}")
+        allowed = [n for c in cited if c in by_id for n in by_id[c]["numbers"]]
+        text_wo_cites = re.sub(r"\[[^\]]*\]", "", s)
+        for raw in NUM.findall(text_wo_cites):
+            n = float(raw.replace(",", "").rstrip("."))
+            if not any(abs(n - a) <= max(0.5, abs(a) * 0.01) for a in allowed):
+                problems.append(f"number {raw} is not in the cited facts")
+        if PRIVATE.search(s):
+            problems.append("contains a subscriber ID or phone number")
+        checked.append({"sentence": s, "cited": cited, "ok": not problems, "problems": problems})
+
+    flagged = sum(not c["ok"] for c in checked)
+    return {"sentences": checked, "total": len(checked), "flagged": flagged,
+            "unsupported_rate": round(flagged / len(checked), 3) if checked else 0.0,
+            "passed": flagged == 0}
+
+
+def load_key():
+    """Read GROQ_API_KEY from the environment, or from the local .env file."""
+    key = os.environ.get("GROQ_API_KEY", "").strip()
+    if not key and os.path.exists(".env"):
+        for line in open(".env"):
+            if line.startswith("GROQ_API_KEY="):
+                key = line.split("=", 1)[1].strip().strip('"').strip("'")
+    return key
+
+
+# ---------------------------------------------------------------------------
+# Second AI pass: the "judge"
+# ---------------------------------------------------------------------------
+# The number check above cannot see MEANING. Example we found: the writer said
+# "39% missed the sports series" when the fact says "the series ended".
+# The number is right, the meaning is wrong. So a second model reads each
+# sentence next to the facts it cites and gives a verdict.
+# We use a DIFFERENT model family as judge, so the two are less likely to share
+# the same blind spots.
+# Tested on 5 planted errors: qwen caught 5/5, gpt-oss-20b caught 4/5 (missed the sports one).
+JUDGE_MODEL = os.environ.get("GROQ_JUDGE_MODEL", "qwen/qwen3.8-27b")
+
+JUDGE_SYSTEM = """You are a strict fact-checker. For each numbered sentence, compare it ONLY with the facts provided.
+Verdicts:
+- "faithful": every factual claim matches the facts in meaning, not just in numbers.
+- "distorted": it uses real numbers but changes their meaning (wrong group, wrong cause, wrong direction, wrong label).
+- "unsupported": it states something that is not in the facts at all.
+Recommendations ("contact", "launch", "offer") are allowed: judge only the factual claims inside them.
+Return JSON: {"verdicts": [{"n": int, "verdict": "faithful|distorted|unsupported", "why": "max 12 words"}]}
+Give a verdict for EVERY sentence, in order. Keep each "why" very short."""
+
+
+def judge_note(verification, facts, api_key):
+    sents = verification["sentences"]
+    listing = "\n".join(f"{i + 1}. {s['sentence']}" for i, s in enumerate(sents))
+    out, meta = _chat([{"role": "system", "content": JUDGE_SYSTEM},
+                       {"role": "user", "content": f"FACTS:\n{facts_block(facts)}\n\nSENTENCES:\n{listing}"}],
+                      api_key, JUDGE_MODEL, temperature=0, max_tokens=900)
+    by_n = {v.get("n"): v for v in out.get("verdicts", [])}
+    for i, s in enumerate(sents):
+        # If the judge ran out of room before reaching a sentence, say "unchecked" - not "unsupported".
+        v = by_n.get(i + 1, {"verdict": "unchecked", "why": "the judge did not reach this sentence"})
+        s["judge"] = {"verdict": v.get("verdict"), "why": v.get("why", "")}
+        s["ok_final"] = s["ok"] and s["judge"]["verdict"] in ("faithful", "unchecked")
+    flagged = sum(not s["ok_final"] for s in sents)
+    verification.update({"judge_meta": meta, "flagged_final": flagged,
+                         "unchecked": sum(s["judge"]["verdict"] == "unchecked" for s in sents),
+                         "unsupported_rate_final": round(flagged / len(sents), 3) if sents else 0.0,
+                         "passed_final": flagged == 0})
+    return verification
+
+
+TRAPS = {"headline": "trap",
+         "paragraphs": ["Churn is up 25% because of the new price increase. [F2]",        # wrong number + invented cause
+                        "Subscriber SUB000123 is the most likely to leave. [F4]",         # privacy leak
+                        "Karachi has the highest churn in the country.",                  # no citation
+                        "39% of the high-risk group missed the sports series. [F8]",      # right number, wrong meaning
+                        "Operator 4 customers are the least likely to cancel. [F11]"],   # right facts, reversed direction
+         "actions": []}
+
+
+def run_pipeline(dashboard, api_key):
+    """Everything the website's 'Regenerate' button does: write, check numbers, judge."""
+    facts = build_facts(dashboard)
+    assert not PRIVATE.search(json.dumps(facts)), "privacy check failed"
+    if not api_key:
+        note = demo_note(facts)
+        note["verification"] = verify_note(note, facts)
+        note["meta"]["total_cost_usd"] = 0
+        return note, facts
+
+    attempts, spent, feedback = [], 0.0, None
+    for attempt in range(2):                         # first draft + at most one repair
+        note = ask_llm(facts, api_key, feedback=feedback)
+        v = verify_note(note, facts)
+        try:
+            v = judge_note(v, facts, api_key)
+        except Exception as e:                       # judge down or rate-limited: keep the note, say so
+            v["judge_error"] = str(e)[:200]
+        spent += note["meta"]["cost_usd"] + v.get("judge_meta", {}).get("cost_usd", 0)
+        bad = [s for s in v["sentences"] if not s.get("ok_final", s["ok"])]
+        problems = [f'"{s["sentence"][:80]}..." -> ' + "; ".join(
+                        s["problems"] + ([f'judge: {s["judge"]["verdict"]} ({s["judge"]["why"]})']
+                                         if s.get("judge", {}).get("verdict", "faithful") not in ("faithful", "unchecked") else []))
+                    for s in bad]
+        attempts.append({"attempt": attempt + 1, "flagged": len(bad), "problems": problems})
+        if not bad:
+            break
+        feedback = {"draft": {k: note[k] for k in ("headline", "paragraphs", "actions")}, "problems": problems}
+    note["verification"] = v
+    note["attempts"] = attempts
+    note["meta"]["total_cost_usd"] = round(spent, 6)
+    return note, facts
