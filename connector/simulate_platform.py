@@ -12,6 +12,8 @@ Run:   .venv/bin/python connector/simulate_platform.py            (Ctrl+C to sto
        .venv/bin/python connector/simulate_platform.py --tick 1 --step 60   (faster)
 """
 import argparse
+import os
+import signal
 import sqlite3
 import time
 from datetime import datetime, timedelta
@@ -22,6 +24,25 @@ import numpy as np
 from create_demo_db import GENRES, PLANS, RENEW_EVERY, fail_chance, make_customers
 
 DB = Path(__file__).with_name("lumen_play.db")
+LOCK = Path(__file__).with_name(".simulator.lock")
+
+
+def take_lock():
+    """Only one simulator may write at a time (two copies would create clashing customer IDs)."""
+    if LOCK.exists():
+        try:
+            pid = int(LOCK.read_text().strip())
+            os.kill(pid, 0)                                  # is that process still alive?
+            raise SystemExit(f"Another simulator is already running (process {pid}). Stop it with Ctrl+C first.")
+        except (ValueError, ProcessLookupError, PermissionError):
+            pass                                             # stale lock from a crash: take it over
+    LOCK.write_text(str(os.getpid()))
+
+
+def next_customer_number(con):
+    """Read the highest existing ID at the moment of sign-up, so IDs never clash."""
+    top = con.execute("SELECT MAX(CAST(SUBSTR(customer_id, 3) AS INTEGER)) FROM customers").fetchone()[0]
+    return (top or 0) + 1
 FMT = "%Y-%m-%d %H:%M:%S"
 rng = np.random.default_rng()
 
@@ -29,7 +50,6 @@ rng = np.random.default_rng()
 def main(tick, step):
     con = sqlite3.connect(DB, timeout=30)
     con.execute("PRAGMA journal_mode=WAL")            # lets the connector read while we write
-    next_id = con.execute("SELECT COUNT(*) FROM customers").fetchone()[0] + 1
     print(f"Lumen Play platform simulator: +{step} platform minutes every {tick}s. Ctrl+C to stop.\n")
     n_tick = 0
     while True:
@@ -88,11 +108,11 @@ def main(tick, step):
         # --- new sign-ups (roughly replacing churn)
         k = rng.poisson(.11 * step / 30 * n / 10_000 * 3)
         if k:
-            cust, traits = make_customers(k, next_id, now, rng)
+            cust, traits = make_customers(k, next_customer_number(con), now, rng)
             cust["signup_date"] = now.strftime(FMT); cust["past_cancellations"] = 0
             cust.to_sql("customers", con, if_exists="append", index=False)
             traits.to_sql("_sim_traits", con, if_exists="append", index=False)
-            next_id += k; counts["signups"] = k
+            counts["signups"] = k
 
         # --- app events, tickets, offers, recommendations
         q = np.array([r[9] for r in rows]); temper = np.array([r[14] for r in rows])
@@ -129,7 +149,12 @@ if __name__ == "__main__":
     ap.add_argument("--tick", type=float, default=2, help="real seconds between writes")
     ap.add_argument("--step", type=int, default=30, help="platform minutes per tick")
     a = ap.parse_args()
+    take_lock()
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt))   # clean up on kill too
     try:
         main(a.tick, a.step)
     except KeyboardInterrupt:
         print("\nSimulator stopped.")
+    finally:
+        if LOCK.exists() and LOCK.read_text().strip() == str(os.getpid()):
+            LOCK.unlink()

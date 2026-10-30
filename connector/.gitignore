@@ -3,3 +3,4 @@ lumen_play.db
 *.db-journal
 *.db-wal
 *.db-shm
+.simulator.lock
