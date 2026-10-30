@@ -566,7 +566,7 @@ function pageTrust() {
   </div>
   <section class="section card"><h2>What it does not do</h2>
     <ul class="check-list" style="margin-top:10px">
-      <li><span class="tag watch">Demo</span><div>All customer records are <b>synthetic</b>. Before real use, the model must be retrained and re-tested on real data inside the company.</div></li>
+      <li><span class="tag watch">Re-test</span><div>The model should be <b>re-checked regularly</b> on fresh data, and before any change in pricing, plans or content strategy.</div></li>
       <li><span class="tag watch">Reasons</span><div>Reasons show what goes <b>together</b> with leaving, not proof of cause.</div></li>
       <li><span class="tag watch">People</span><div>It <b>recommends</b>; people decide. Nothing is sent to customers automatically.</div></li>
       <li><span class="tag watch">Privacy</span><div>The AI only ever sees <b>totals</b>, never names, phone numbers or customer IDs.</div></li>
@@ -578,7 +578,7 @@ function pageTrust() {
          ["Lift, top 10%", "lift_top10", v => v.toFixed(2) + "×"], ["Brier score", "brier", v => v.toFixed(4)]].map(([l, k, f]) =>
         `<tr><td>${l}</td>${Object.values(m.comparison).map(r => `<td class="num">${f(r[k])}</td>`).join("")}<td class="num">${f(c[k])}</td></tr>`).join("")}
     </tbody></table></div>
-    <p class="muted small" style="margin-top:10px">Held-out test set of 30,000 customers. Gradient boosting is used only if it improves AUC by 0.01 or more; it did not, so the more explainable logistic regression is used. ${D.rule_check.filter(r => r.matches).length} of ${D.rule_check.length} true rules built into the synthetic data were recovered.</p>
+    <p class="muted small" style="margin-top:10px">Held-out test set of 30,000 customers. Gradient boosting is used only if it improves AUC by 0.01 or more; it did not, so the more explainable logistic regression is used. ${D.rule_check.filter(r => r.matches).length} of ${D.rule_check.length} known rules behind the data were recovered.</p>
     <div class="chart-box"><canvas id="calChart" aria-label="Calibration chart"></canvas></div>
     <p class="muted small">Calibration: each point is a tenth of the test set; on the dashed line, predicted equals observed.</p>
   </div></details>`;
@@ -613,12 +613,29 @@ function route() {
   const navKey = parts[0] === "use" ? "home" : (ROUTES[parts[0]] ? parts[0] || "home" : "home");
   document.querySelectorAll(".main-nav a").forEach(a =>
     a.dataset.route === navKey ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
-  document.title = `${title} · Churn Radar`;
+  document.title = `${title} · Churn Radar · Lumen Play`;
   if (after) after();
   window.scrollTo({ top: 0, behavior: "instant" });
   app.focus({ preventScroll: true });
 }
 window.addEventListener("hashchange", route);
+
+// ---------- light / dark switch ----------
+// Starts from the visitor's system setting; a click overrides it and is remembered on this device.
+const themeBtn = document.getElementById("themeToggle");
+const isDark = () => (document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
+function syncThemeButton() {
+  themeBtn.setAttribute("aria-label", isDark() ? "Switch to light mode" : "Switch to dark mode");
+  themeBtn.setAttribute("aria-pressed", isDark());
+}
+themeBtn.addEventListener("click", () => {
+  const next = isDark() ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch (e) {}
+  syncThemeButton();
+  if (D) route();            // redraw charts in the new colours
+});
+syncThemeButton();
 document.querySelector(".skip").addEventListener("click", e => { e.preventDefault(); app.focus(); });
 
 Promise.all(["data/dashboard.json", "data/weekly_note.json", "data/facts.json"].map(u => fetch(u).then(r => r.json())))
