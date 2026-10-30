@@ -196,6 +196,13 @@ reason_summary = sorted([{"code": c, "label": LABEL[c], "group": GROUP[c], "coun
 group_summary = {}
 for r in reason_summary:
     group_summary[r["group"]] = group_summary.get(r["group"], 0) + r["count"]
+# Themes for executives: share of high-risk subscribers with at least one reason in each theme
+theme_people = {}
+for i in high.index:
+    for g in {r["group"] for r in top_reasons(i)}:
+        theme_people[g] = theme_people.get(g, 0) + 1
+theme_summary = sorted([{"theme": g, "share": round(n / len(high), 3), "people": n}
+                        for g, n in theme_people.items()], key=lambda t: -t["share"])
 
 # ---------------------------------------------------------------------------
 # 5. Segments and 6. deciles
@@ -242,7 +249,7 @@ kpis = {
 }
 chosen = metrics["chosen_model"]
 out = {"kpis": kpis, "population_avg": population_avg, "reason_summary": reason_summary,
-       "group_summary": group_summary, "personas": personas, "content": content, "segments": segments,
+       "group_summary": group_summary, "theme_summary": theme_summary, "personas": personas, "content": content, "segments": segments,
        "deciles": deciles, "watchlist": watchlist, "rule_check": rule_check,
        "model": {"name": chosen, **metrics["results"][chosen],
                  "comparison": {n: {k: r[k] for k in ["auc", "precision_top10", "recall_top10", "lift_top10", "brier"]}

@@ -1,391 +1,626 @@
-// Churn Radar report. Reads the JSON files that Steps 4 and 5 produce.
-const PKR = n => "PKR " + Math.round(n).toLocaleString("en-US");
+// Churn Radar - executive retention briefing.
+// One page app with simple hash routes (#/, #/briefing, #/use/cfo ...), so the back button
+// works and every view has its own link. Reads the JSON files that Steps 4 and 5 produce.
+
+// ---------- formatting ----------
 const NUM = n => Math.round(n).toLocaleString("en-US");
+const PKR = n => "PKR " + Math.round(n).toLocaleString("en-US");
+const PKRs = n => (Math.abs(n) >= 1e6 ? "PKR " + (n / 1e6).toFixed(2) + "M" : Math.abs(n) >= 1e3 ? "PKR " + Math.round(n / 1e3) + "k" : PKR(n));
 const PCT = (x, d = 0) => (x * 100).toFixed(d) + "%";
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-const ST = (ok, yes = "Verified", no = "Flagged") => `<span class="st ${ok ? "ok" : "bad"}">${ok ? yes : no}</span>`;
-const USD_TO_PKR = 280;
-
-let D, NOTE, FACTS;
-const charts = {};
+const $ = sel => document.querySelector(sel);
+const app = document.getElementById("app");
 const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-document.getElementById("period").textContent = "Week ending " + today;
+let D, NOTE, FACTS;
+const charts = [];
 
-// ---------- tabs ----------
-document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
-  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("active", x === t));
-  document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === t.dataset.tab));
-  // Charts drawn while their tab was hidden have zero size; resize them now that they are visible.
-  Object.values(charts).forEach(c => c.resize());
-}));
-
-function chart(id, config) {
-  if (charts[id]) charts[id].destroy();
-  Chart.defaults.color = css("--muted");
-  Chart.defaults.borderColor = css("--rule-2");
-  Chart.defaults.font.family = "'IBM Plex Sans', Arial, sans-serif";
-  Chart.defaults.font.size = 12;
-  Chart.defaults.plugins.legend.labels.boxWidth = 12;
-  Chart.defaults.plugins.tooltip.cornerRadius = 0;
-  charts[id] = new Chart(document.getElementById(id), config);
-}
-
-// ---------- executive summary ----------
-function renderOverview() {
-  const k = D.kpis;
-  document.getElementById("kpis").innerHTML = [
-    ["Subscribers scored", NUM(k.subscribers), `${k.signals} signals each`],
-    ["Expected cancellations", NUM(k.expected_churners), PCT(k.expected_churn_rate, 1) + " of the base, next 30 days"],
-    ["Revenue at risk", PKR(k.revenue_at_risk_pkr), "per month, whole base"],
-    ["High-risk revenue at risk", PKR(k.high_risk_revenue_at_risk_pkr), `top decile, ${NUM(k.high_risk_subscribers)} subscribers`],
-  ].map(([l, v, n]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
-
-  const ct = D.content.filter(c => c.fans_whose_title_ended > 0);
-  document.getElementById("contentTable").innerHTML =
-    `<thead><tr><th>Genre</th><th>Ended</th><th>Next release</th><th class="num">In</th><th class="num">Waiting</th><th class="num">High-risk</th></tr></thead><tbody>` +
-    ct.map(c => `<tr><td>${esc(c.genre)}</td><td class="wrap" style="min-width:150px">${esc(c.ended_title)}<div class="hint small" style="margin:0">${c.ended_days_ago} days ago</div></td>
-      <td class="wrap" style="min-width:130px">${esc(c.next_title)}</td><td class="num">${c.next_release_in_days} d</td>
-      <td class="num">${NUM(c.fans_whose_title_ended)}</td><td class="num"><b>${NUM(c.high_risk_waiting)}</b></td></tr>`).join("") + "</tbody>";
-  const worst = [...ct].sort((a, b) => b.high_risk_waiting - a.high_risk_waiting)[0];
-  document.getElementById("contentNote").textContent = worst ?
-    `${worst.genre} followers face the longest exposure: ${NUM(worst.high_risk_waiting)} high-risk fans must wait ${worst.next_release_in_days} days for ${worst.next_title}. ` +
-    `Genres with a release within a week show lower risk among waiting fans.` : "";
-  document.getElementById("personaTable").innerHTML =
-    `<thead><tr><th>Persona</th><th class="num">Subscribers</th><th class="num">Avg risk</th><th class="num">High-risk</th><th class="num">Revenue at risk</th></tr></thead><tbody>` +
-    D.personas.map(p => `<tr><td class="wrap" style="min-width:170px"><b>${esc(p.persona)}</b><div class="hint small" style="margin:0">${esc(p.description)}</div></td>
-      <td class="num">${NUM(p.subscribers)}</td><td class="num">${PCT(p.avg_risk, 1)}</td><td class="num">${NUM(p.high_risk)}</td>
-      <td class="num">${PKR(p.revenue_at_risk_pkr)}</td></tr>`).join("") + "</tbody>";
-
-  chart("reasonsChart", {
-    type: "bar",
-    data: { labels: D.reason_summary.slice(0, 12).map(r => `${r.label} (${r.group})`),
-            datasets: [{ data: D.reason_summary.slice(0, 12).map(r => r.share * 100), backgroundColor: css("--navy"), barThickness: 12 }] },
-    options: { indexAxis: "y", maintainAspectRatio: false, plugins: { legend: { display: false },
-               tooltip: { callbacks: { label: c => `${c.raw.toFixed(0)}% of high-risk subscribers` } } },
-               scales: { x: { ticks: { callback: v => v + "%" } }, y: { grid: { display: false } } } },
-  });
-  renderSegment();
-}
-
-function renderSegment() {
-  const key = document.getElementById("segmentPick").value;
-  const rows = D.segments[key];
-  chart("segmentChart", {
-    data: { labels: rows.map(r => r.segment), datasets: [
-      { type: "bar", label: "Revenue at risk (PKR)", data: rows.map(r => r.revenue_at_risk_pkr),
-        backgroundColor: css("--navy"), yAxisID: "y", maxBarThickness: 46, order: 2 },
-      { type: "line", label: "Average risk", data: rows.map(r => r.avg_risk * 100), borderWidth: 2,
-        borderColor: css("--burgundy"), backgroundColor: css("--burgundy"), pointRadius: 3, yAxisID: "y2", order: 1 }] },
-    options: { maintainAspectRatio: false, plugins: { legend: { position: "bottom" } },
-               scales: { x: { grid: { display: false } }, y: { ticks: { callback: v => (v / 1000) + "k" } },
-                         y2: { position: "right", grid: { display: false }, ticks: { callback: v => v.toFixed(1) + "%" } } } },
-  });
-  document.getElementById("segmentTable").innerHTML =
-    `<thead><tr><th>Segment</th><th class="num">Subscribers</th><th class="num">Average risk</th><th class="num">Expected leavers</th>
-     <th class="num">In top decile</th><th class="num">Revenue at risk</th></tr></thead><tbody>` +
-    rows.map(r => `<tr><td>${esc(r.segment)}</td><td class="num">${NUM(r.subscribers)}</td><td class="num">${PCT(r.avg_risk, 1)}</td>
-      <td class="num">${NUM(r.expected_churners)}</td><td class="num">${NUM(r.high_risk)}</td><td class="num">${PKR(r.revenue_at_risk_pkr)}</td></tr>`).join("") + "</tbody>";
-}
-document.getElementById("segmentPick").addEventListener("change", renderSegment);
-
-// ---------- weekly memorandum ----------
-const SPLIT = /(?<=[.!?\]])\s+(?=[A-Z])/;
-const judgeOf = c => (c && c.judge ? c.judge.verdict : null);
-const okFinal = c => (c.ok_final !== undefined ? c.ok_final : c.ok);
-const stripCites = s => s.replace(/\s*\[[^\]]*\]/g, "");
-
-// Turn "... text [F2, F3]." into "... text.2,3" with the numbers as a superscript footnote.
-function sentenceHTML(text, check, n) {
-  const cites = [...text.matchAll(/\[([^\]]*)\]/g)].map(m => m[1]).join(", ");
-  const nums = (cites.match(/F\d+/g) || []).map(f => f.slice(1));
-  let body = esc(stripCites(text)).trim();
-  const ok = check ? okFinal(check) : true;
-  const tip = check ? `Statement ${n}\nNumerical check: ${check.ok ? "passed" : check.problems.join("; ")}\n` +
-    `Semantic review: ${judgeOf(check) || "not run"}${check.judge && check.judge.why ? " (" + check.judge.why + ")" : ""}` : "";
-  const sup = `<sup class="${ok ? "" : "flag"}" title="${esc(tip)}">${nums.length ? nums.join(",") : "?"}</sup>`;
-  body = /[.!?]$/.test(body) ? body + sup : body + "." + sup;
-  return `<span class="s ${ok ? "" : "flagged"}">${body}</span>`;
-}
-
-function renderNote() {
-  const v = NOTE.verification, sents = v.sentences;
-  let i = 0;
-  const render = part => part.split(SPLIT).filter(Boolean).map(s => { i++; return sentenceHTML(s, sents[i - 1], i); }).join(" ");
-  document.getElementById("noteHeadline").textContent = NOTE.headline;
-  document.getElementById("noteBody").innerHTML = NOTE.paragraphs.map(p => `<p>${render(p)}</p>`).join("");
-  document.getElementById("noteActions").innerHTML = (NOTE.actions || []).map(a => `<li>${render(a)}</li>`).join("");
-  document.getElementById("memoDate").textContent = today;
-
-  const total = v.total, flagged = v.flagged_final ?? v.flagged, judged = !!v.judge_meta;
-  const faithful = sents.filter(s => judgeOf(s) === "faithful").length;
-  const numOk = total - v.flagged, rate = v.unsupported_rate_final ?? v.unsupported_rate;
-  const drafts = NOTE.attempts ? NOTE.attempts.length : 1;
-  const live = NOTE.meta.mode === "live";
-
-  document.getElementById("memoStatus").innerHTML = !live ? `<span class="st na">Template (no model key configured)</span>`
-    : flagged === 0 ? `${ST(true)} &nbsp;${total} of ${total} statements` : `${ST(false)} &nbsp;${flagged} of ${total} statements require review`;
-
-  const st = document.getElementById("statement");
-  st.classList.toggle("flagged", flagged > 0);
-  st.innerHTML = live ?
-    `Of the <b>${total}</b> statements in this memorandum, <b>${total - flagged}</b> were verified against the ${FACTS.length} source facts. ` +
-    `The numerical check passed <b>${numOk} of ${total}</b>` +
-    (judged ? `; the independent semantic review (${esc(v.judge_meta.model)}) judged <b>${faithful} of ${total}</b> faithful.`
-            : `; the semantic review was not available for this run${v.judge_error ? " (" + esc(v.judge_error.slice(0, 80)) + ")" : ""}.`) +
-    ` Unsupported-claim rate: <b>${PCT(rate, 1)}</b>, against a target below 2.0%. ` +
-    (drafts === 1 ? "Accepted on the first draft." : `Accepted after ${drafts - 1} revision${drafts > 2 ? "s" : ""} by the drafting model.`)
-    : "This memorandum was produced from a fixed template because no model key is configured. The numerical check was still applied.";
-
-  document.getElementById("verifySummary").innerHTML = `<div class="kpis small">
-    <div class="kpi ${rate < .02 ? "pos" : "neg"}"><div class="label">Unsupported</div><div class="value">${PCT(rate, 1)}</div><div class="note">target &lt; 2.0%</div></div>
-    <div class="kpi"><div class="label">Numerical</div><div class="value">${numOk}/${total}</div><div class="note">passed</div></div>
-    <div class="kpi"><div class="label">Semantic</div><div class="value">${judged ? faithful + "/" + total : "n/a"}</div><div class="note">faithful</div></div></div>`;
-
-  // Audit trail
-  document.getElementById("auditTable").innerHTML =
-    `<thead><tr><th class="num">No.</th><th>Statement</th><th>Sources</th><th>Numerical check</th><th>Semantic review</th><th>Result</th></tr></thead><tbody>` +
-    sents.map((s, n) => {
-      const j = judgeOf(s);
-      const jCell = !j ? `<span class="st na">Not run</span>` : j === "unchecked" ? `<span class="st na">Not reached</span>`
-        : `${ST(j === "faithful", "Faithful", j[0].toUpperCase() + j.slice(1))}<div class="hint small" style="margin:2px 0 0">${esc(s.judge.why || "")}</div>`;
-      return `<tr><td class="num">${n + 1}</td><td class="wrap">${esc(stripCites(s.sentence))}</td>
-        <td>${s.cited.length ? s.cited.join(", ") : "none"}</td>
-        <td>${ST(s.ok, "Passed", "Failed")}${s.ok ? "" : `<div class="hint small" style="margin:2px 0 0;white-space:normal">${esc(s.problems.join("; "))}</div>`}</td>
-        <td style="white-space:normal;min-width:170px">${jCell}</td><td>${ST(okFinal(s))}</td></tr>`;
-    }).join("") + "</tbody>";
-
-  // Control test
-  const t = NOTE.trap_test;
-  document.getElementById("trapTable").innerHTML = t && t.details ?
-    `<thead><tr><th>Planted statement</th><th>Numerical</th><th>Semantic</th></tr></thead><tbody>` +
-    t.details.map(d => `<tr><td class="wrap">${esc(stripCites(d.sentence))}</td>
-      <td>${ST(d.numbers_caught, "Detected", "Missed")}</td>
-      <td title="${esc(d.why)}">${ST(d.judge !== "faithful", "Detected", "Missed")}</td></tr>`).join("") +
-    `</tbody><tfoot><tr><td>Detected (either check: ${t.caught_both} of ${t.planted})</td><td>${t.caught_numbers_only} of ${t.planted}</td>` +
-    `<td>${t.details.filter(d => d.judge !== "faithful").length} of ${t.planted}</td></tr></tfoot>`
-    : `<tbody><tr><td>The control test runs only when a model key is configured.</td></tr></tbody>`;
-
-  document.getElementById("factList").innerHTML = FACTS.map(f => `<li><b>${f.id.slice(1)}</b><span>${esc(f.text)}</span></li>`).join("");
-
-  // Run record
-  const m = NOTE.meta, j = v.judge_meta, totalUsd = m.total_cost_usd ?? m.cost_usd;
-  const rows = live ? [
-    ["Drafting model", esc(m.model)], ["Drafting tokens (in / out)", `${NUM(m.input_tokens)} / ${NUM(m.output_tokens)}`],
-    ["Drafting cost", `$${m.cost_usd.toFixed(6)}`],
-    ...(j ? [["Review model", esc(j.model)], ["Review tokens (in / out)", `${NUM(j.input_tokens)} / ${NUM(j.output_tokens)}`],
-             ["Review cost", `$${j.cost_usd.toFixed(6)}${j.price_is_estimate ? " (estimated rate)" : ""}`]] : []),
-    ["Drafts required", drafts], ["Latency, final draft", `${m.seconds} s`],
-    ["Total cost", `<b>$${totalUsd.toFixed(6)}</b> (≈ PKR ${(totalUsd * USD_TO_PKR).toFixed(2)})`],
-    ["Projected cost, 52 weekly memoranda", `$${(totalUsd * 52).toFixed(4)} per year`],
-  ] : [["Mode", "Template, no model call"], ["Cost", "$0"]];
-  document.getElementById("runTable").innerHTML = "<tbody>" + rows.map(([a, b]) => `<tr><td>${a}</td><td class="num">${b}</td></tr>`).join("") + "</tbody>";
-}
-
-document.getElementById("regen").addEventListener("click", async e => {
-  const b = e.target; b.disabled = true; b.textContent = "Drafting…";
-  try {
-    const r = await fetch("/api/weekly_note", { method: "POST" });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || r.statusText);
-    NOTE = { ...j.note, trap_test: NOTE.trap_test }; FACTS = j.facts; renderNote();
-  } catch (err) {
-    document.getElementById("memoStatus").insertAdjacentHTML("beforeend",
-      ` <span class="st bad">Live redraft failed: ${esc(err.message.slice(0, 80))}</span>`);
-  } finally { b.disabled = false; b.textContent = "Redraft live"; }
-});
-
-// ---------- priority contact list ----------
-const ACTIONS = {
-  watch_change_pct: "Send a personalised selection of content matched to their viewing history.",
-  watch_trend_8w_pct: "Start a re-engagement series: new titles in their favourite category over the next four weeks.",
-  days_since_active: "Send a win-back message summarising what is new since their last visit.",
-  completion_rate: "Recommend shorter formats and highly rated titles in their category.",
-  category_concentration: "Introduce one adjacent category they are likely to enjoy, to widen their reasons to stay.",
-  fav_content_ended: "Promote the next release in their genre, with dates, and highlights of what just ended.",
-  days_to_next_release: "Bridge the gap until the next release with related content and a release reminder.",
+// ---------- plain-language vocabulary ----------
+const THEME = {
+  Content: { label: "The show they came for has ended", short: "content ending" },
+  Viewing: { label: "Watching less than before", short: "falling viewing" },
+  Payment: { label: "Payment problems", short: "payment failures" },
+  Support: { label: "A bad support experience", short: "poor support experiences" },
+  "Plan history": { label: "Downgraded or cancelled before", short: "past downgrades" },
+  Experience: { label: "App or streaming problems", short: "app problems" },
+  Marketing: { label: "Only here for discounts", short: "discount dependence" },
+  Profile: { label: "New, or on a daily pack", short: "new customers" },
+};
+const PLAY = {
+  "Payment-troubled": "Fix the bill, not the price: renew just after their usual top-up, remind them before renewal, offer wallet billing.",
+  "Frustrated by quality": "Apologise and fix: a senior call-back on angry tickets within 24 hours, lower start quality on slow networks.",
+  "Seasonal live fans": "Bridge the gap: highlights and classic matches now, and a reminder for the next event's start date.",
+  "Fading viewers": "Re-spark interest: a personal 'picked for you' message and one new category to try.",
+  "Discount hunters": "Avoid another discount: offer added value instead, such as a data bundle.",
+  "Engaged regulars": "No action needed: keep the experience good.",
+};
+const ACTION = {
+  watch_change_pct: "Send a personal 'picked for you' message based on what they used to watch.",
+  watch_trend_8w_pct: "Start a four-week re-engagement series in their favourite category.",
+  days_since_active: "Send a 'what's new since you've been away' message.",
+  completion_rate: "Recommend shorter, highly rated titles in their category.",
+  category_concentration: "Introduce one related category they are likely to enjoy.",
+  fav_content_ended: "Promote the next release in their genre, with dates, plus highlights of what just ended.",
+  days_to_next_release: "Bridge the wait with related content and a release-date reminder.",
   recs_ignored_30d: "Refresh their recommendations; ask two quick taste questions in the app.",
-  failed_renewals_30d: "Offer payment assistance: a top-up reminder before renewal, or a move to wallet billing.",
-  low_balance_renewals_30d: "Shift the renewal date to just after their usual recharge, or offer a weekly plan.",
-  payment_switches_90d: "Confirm their preferred payment method and make it the default.",
-  buffering_errors_7d: "Provide streaming guidance and check device or network quality.",
-  app_crashes_7d: "Prompt an app update and pass the device details to engineering.",
-  video_start_sec: "Suggest a lower starting quality on their network; flag the network to engineering.",
-  plan_downgrades_90d: "Check what they miss from the higher plan; offer a short trial of it.",
-  past_cancellations: "Treat as a returning customer: a welcome-back message with what has changed.",
-  offer_open_rate: "Stop generic offers; use a single personalised message instead.",
-  used_discount: "Offer added value (content or a data bundle) rather than a further discount.",
-  support_tickets_30d: "Arrange a call-back from support to resolve the open issue.",
+  failed_renewals_30d: "Offer payment help: a reminder before renewal, or a move to wallet billing.",
+  low_balance_renewals_30d: "Move their renewal to just after their usual top-up, or offer a weekly plan.",
+  payment_switches_90d: "Confirm their preferred payment method and set it as default.",
+  buffering_errors_7d: "Check their device and network; share tips for smoother streaming.",
+  app_crashes_7d: "Prompt an app update and send the device details to engineering.",
+  video_start_sec: "Lower the starting video quality on their network; flag it to engineering.",
+  plan_downgrades_90d: "Ask what they miss from the higher plan; offer a short trial of it.",
+  past_cancellations: "Treat as a returning customer: a welcome-back message on what has changed.",
+  offer_open_rate: "Stop generic offers; send one personal message instead.",
+  used_discount: "Offer added value rather than another discount.",
+  support_tickets_30d: "Arrange a call-back to resolve their open issue.",
   ticket_negative: "Escalate to a senior agent for a personal call-back within 24 hours.",
-  tenure_days: "Send an onboarding sequence presenting the strongest titles in the catalogue.",
-  sessions_7d: "Send a short trailer for a title likely to interest them.",
-  plan_Daily: "Propose an upgrade to a Weekly or Monthly plan at a modest saving.",
+  tenure_days: "Send an onboarding message showing the best of the catalogue.",
+  sessions_7d: "Send a short trailer for something they are likely to enjoy.",
+  plan_Daily: "Offer a Weekly or Monthly plan at a small saving.",
 };
-const FACT_LABELS = {
-  watch_change_pct: ["Viewing change vs prior week", v => v.toFixed(0) + "%"],
-  watch_trend_8w_pct: ["Viewing trend, 8 weeks (per month)", v => v.toFixed(0) + "%"],
-  days_since_active: ["Days since last active", v => v.toFixed(1)],
-  completion_rate: ["Completion rate", v => (v * 100).toFixed(0) + "%"],
-  category_concentration: ["Share of viewing in one category", v => (v * 100).toFixed(0) + "%"],
-  fav_content_ended: ["Followed title has ended", v => (v >= 0.5 ? "Yes" : (v * 100).toFixed(0) + "%")],
-  days_to_next_release: ["Days to next release in genre", v => v.toFixed(0)],
-  failed_renewals_30d: ["Failed renewals, 30 days", v => v.toFixed(1)],
-  low_balance_renewals_30d: ["Low-balance renewals, 30 days", v => v.toFixed(1)],
-  buffering_errors_7d: ["Buffering errors, 7 days", v => v.toFixed(1)],
-  app_crashes_7d: ["App crashes, 7 days", v => v.toFixed(1)],
-  video_start_sec: ["Video start time, seconds", v => v.toFixed(1)],
-  support_tickets_30d: ["Support tickets, 30 days", v => v.toFixed(1)],
-  ticket_negative: ["Negative ticket", v => (v >= 0.5 ? "Yes" : (v * 100).toFixed(0) + "%")],
-  offer_open_rate: ["Offers opened", v => (v * 100).toFixed(0) + "%"],
-  tenure_days: ["Tenure, days", v => v.toFixed(0)],
-  sessions_7d: ["Sessions, 7 days", v => v.toFixed(1)],
-};
+const COMPARE = [
+  ["days_since_active", "Days since they last watched", v => v.toFixed(0)],
+  ["watch_change_pct", "Viewing vs last week", v => (v > 0 ? "+" : "") + v.toFixed(0) + "%"],
+  ["completion_rate", "Shows they finish", v => (v * 100).toFixed(0) + "%"],
+  ["failed_renewals_30d", "Failed payments this month", v => v.toFixed(v % 1 ? 1 : 0)],
+  ["support_tickets_30d", "Support tickets this month", v => v.toFixed(v % 1 ? 1 : 0)],
+  ["video_start_sec", "Seconds for a video to start", v => v.toFixed(1)],
+  ["tenure_days", "Days as a customer", v => v.toFixed(0)],
+];
+const riskLabel = s => (s >= 0.5 ? ["Very high", "very-high"] : s >= 0.3 ? ["High", "high"] : s >= 0.15 ? ["Elevated", "elevated"] : ["Watch", "watch"]);
 
-function renderWatchFilters() {
-  const opts = (sel, vals) => sel.insertAdjacentHTML("beforeend", vals.map(v => `<option>${esc(v)}</option>`).join(""));
-  opts(document.getElementById("wPlan"), [...new Set(D.watchlist.map(w => w.plan))].sort());
-  opts(document.getElementById("wChannel"), [...new Set(D.watchlist.map(w => w.channel))].sort());
-  opts(document.getElementById("wPersona"), D.personas.map(p => p.persona).filter(p => D.watchlist.some(w => w.persona === p)));
-  ["wSearch", "wPlan", "wChannel", "wPersona"].forEach(id => document.getElementById(id).addEventListener("input", renderWatch));
-}
-
-const riskColor = s => (s >= .3 ? css("--burgundy") : s >= .15 ? css("--gold") : css("--slate"));
-
-function renderWatch() {
-  const q = document.getElementById("wSearch").value.trim().toUpperCase();
-  const plan = document.getElementById("wPlan").value, ch = document.getElementById("wChannel").value, pe = document.getElementById("wPersona").value;
-  const rows = D.watchlist.filter(w => (!q || w.id.includes(q)) && (!plan || w.plan === plan) && (!ch || w.channel === ch) && (!pe || w.persona === pe));
-  document.getElementById("watchTable").innerHTML =
-    `<thead><tr><th class="num">Rank</th><th>Subscriber</th><th>Probability</th><th>Persona</th><th>Plan</th><th>Channel</th><th class="num">PKR / month</th><th>Principal reason</th></tr></thead><tbody>` +
-    rows.map(w => `<tr class="click" data-id="${w.id}"><td class="num">${w.rank}</td><td>${w.id}</td>
-      <td><span class="bar" style="width:${w.score * 70}px;background:${riskColor(w.score)}"></span>${PCT(w.score)}</td>
-      <td>${esc(w.persona)}</td><td>${esc(w.plan)}</td><td>${esc(w.channel)}</td><td class="num">${w.revenue}</td>
-      <td>${w.reasons[0] ? esc(w.reasons[0].text) : "—"}</td></tr>`).join("") + "</tbody>";
-  document.querySelectorAll("#watchTable tr.click").forEach(tr => tr.addEventListener("click", () => {
-    document.querySelectorAll("#watchTable tr.sel").forEach(x => x.classList.remove("sel"));
-    tr.classList.add("sel"); explain(tr.dataset.id);
-  }));
-}
-
-function explain(id) {
-  const w = D.watchlist.find(x => x.id === id);
-  const maxW = Math.max(...w.reasons.map(r => r.weight), .01);
-  const top = w.reasons[0];
-  document.getElementById("explain").innerHTML = `
-    <div class="label">Subscriber explanation</div>
-    <div class="subject">${w.id}</div>
-    <p class="hint" style="margin:0">${esc(w.plan)} plan · ${esc(w.channel)} · ${esc(w.city)} · ${esc(w.genre)} · PKR ${w.revenue} per month<br>Persona: <b>${esc(w.persona)}</b></p>
-    <div class="score-line"><span class="big">${PCT(w.score)}</span>
-      <span>probability of cancelling within 30 days<br><span class="hint small">Rank ${w.rank} of ${NUM(D.kpis.subscribers)}; ${(w.score / D.kpis.expected_churn_rate).toFixed(1)} times the base average</span></span></div>
-    <h3>Principal reasons</h3>
-    ${w.reasons.map(r => `<div class="reason">${esc(r.text)} <span class="hint small">· ${esc(r.group)}</span><div class="rbar" style="width:${r.weight / maxW * 100}%"></div></div>`).join("") || "<p class='hint'>No single dominant reason.</p>"}
-    <h3>Against the base average</h3>
-    <table><thead><tr><th>Measure</th><th class="num">Subscriber</th><th class="num">Average</th></tr></thead><tbody>${Object.entries(FACT_LABELS).map(([k, [lab, f]]) =>
-      `<tr><td>${lab}</td><td class="num"><b>${f(w.facts[k])}</b></td><td class="num">${f(D.population_avg[k])}</td></tr>`).join("")}</tbody></table>
-    ${top ? `<div class="action-box"><div class="label">Suggested action, subject to approval</div><p>${ACTIONS[top.code]}</p></div>` : ""}`;
-}
-
-// ---------- campaign scenarios ----------
+// ---------- campaign maths (shared by home, CFO page and planner) ----------
 function simulate(k, save, disc, take) {
   const ds = D.deciles.slice(0, k);
   const contacted = ds.reduce((a, d) => a + d.subscribers, 0);
   const leavers = ds.reduce((a, d) => a + d.expected_churners, 0);
   const avgRev = ds.reduce((a, d) => a + d.avg_revenue * d.subscribers, 0) / contacted;
-  const saved = leavers * save;
-  const revSaved = saved * avgRev;
-  const stayers = contacted - leavers + saved;
-  const cost = stayers * take * avgRev * disc;
-  // The same campaign aimed at randomly chosen subscribers, for comparison
+  const saved = leavers * save, protectedRev = saved * avgRev;
+  const cost = (contacted - leavers + saved) * take * avgRev * disc;
   const rLeavers = contacted * D.kpis.expected_churn_rate, rSaved = rLeavers * save;
   const rNet = rSaved * D.kpis.avg_revenue_pkr - (contacted - rLeavers + rSaved) * take * D.kpis.avg_revenue_pkr * disc;
-  return { contacted, leavers, saved, revSaved, cost, net: revSaved - cost, rNet };
+  return { contacted, leavers, saved, protectedRev, cost, net: protectedRev - cost, rNet, roi: cost ? (protectedRev - cost) / cost : 0 };
+}
+const DEFAULT = { k: 1, save: 0.30, disc: 0.15, take: 0.50 };
+const base = () => simulate(DEFAULT.k, DEFAULT.save, DEFAULT.disc, DEFAULT.take);
+
+// ---------- small render helpers ----------
+const stat = (label, value, note = "", cls = "") =>
+  `<div class="stat ${cls}"><div class="label">${label}</div><div class="value">${value}</div><div class="note">${note}</div></div>`;
+function bars(rows, { max, fmt = v => PCT(v), cls = "" } = {}) {
+  const m = max ?? Math.max(...rows.map(r => r.value), 0.0001);
+  return `<div class="bars" role="list">` + rows.map(r => `
+    <div class="bar-row" role="listitem">
+      <div class="name">${esc(r.name)}${r.sub ? `<small>${esc(r.sub)}</small>` : ""}</div>
+      <div class="bar-track" aria-hidden="true"><div class="bar-fill ${r.cls || cls}" style="width:${Math.max(2, r.value / m * 100)}%"></div></div>
+      <div class="val">${fmt(r.value)}</div>
+    </div>`).join("") + `</div>`;
+}
+const themeBars = (n = 6) => bars(D.theme_summary.slice(0, n).map(t => ({ name: THEME[t.theme]?.label || t.theme, value: t.share })), { max: 1 });
+function newChart(id, cfg) {
+  if (!window.Chart) return;
+  Chart.defaults.font.family = "Inter, system-ui, sans-serif";
+  Chart.defaults.color = css("--muted");
+  Chart.defaults.borderColor = css("--line-2");
+  charts.push(new Chart(document.getElementById(id), cfg));
+}
+const icon = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+const ICONS = {
+  ceo: icon('<path d="M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6"/>'),
+  cfo: icon('<path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>'),
+  retention: icon('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>'),
+  content: icon('<rect x="2" y="5" width="20" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/>'),
+  product: icon('<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>'),
+  billing: icon('<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>'),
+};
+
+// ---------- use cases (one per leadership role) ----------
+const USE_CASES = {
+  ceo: {
+    who: "For the CEO", q: "Where are we losing customers, and why?",
+    answer: () => {
+      const t = D.theme_summary;
+      return `About <b>${NUM(D.kpis.expected_churners)}</b> customers (${PCT(D.kpis.expected_churn_rate, 1)}) are likely to leave in the next 30 days, putting <b>${PKRs(D.kpis.revenue_at_risk_pkr)}</b> of monthly revenue at risk. The two biggest causes are <b>${THEME[t[0].theme].short}</b> and <b>${THEME[t[1].theme].short}</b>.`;
+    },
+    stats: () => {
+      const p = [...D.personas].sort((a, b) => b.revenue_at_risk_pkr - a.revenue_at_risk_pkr)[0];
+      return [stat("Likely to leave in 30 days", NUM(D.kpis.expected_churners), PCT(D.kpis.expected_churn_rate, 1) + " of customers"),
+              stat("Monthly revenue at risk", PKRs(D.kpis.revenue_at_risk_pkr), "about " + PKRs(D.kpis.revenue_at_risk_pkr * 12) + " a year", "bad"),
+              stat("Most exposed group", esc(p.persona), PKRs(p.revenue_at_risk_pkr) + " a month at risk")];
+    },
+    visual: () => `<h3>Why customers in the high-risk group are leaving</h3><p class="muted small">Share of the 10,000 highest-risk customers for whom each issue is a main reason (a customer can have more than one).</p>${themeBars()}`,
+    recs: () => {
+      const pay = D.personas.find(p => p.persona === "Payment-troubled");
+      const sp = D.content.find(c => c.genre === "Sports");
+      return [["Fix payment failures with our billing partners", `${NUM(pay.subscribers)} customers have repeated failed renewals; they carry ${PKRs(pay.revenue_at_risk_pkr)} a month at risk. This is a process fix, not a discount.`],
+              ["Bridge the gap between big content events", `${NUM(sp.high_risk_waiting)} high-risk sports fans must wait ${sp.next_release_in_days} days for the ${sp.next_title}. Fill the gap with highlights and reminders.`],
+              ["Run a targeted retention campaign", `Contacting only the highest-risk 10% is expected to return about ${PKRs(base().net)} a month, where the same offer sent at random would lose money.`]];
+    },
+    links: [["Read the weekly briefing", "#/briefing"], ["See where the risk is", "#/risk"]],
+  },
+  cfo: {
+    who: "For the CFO", q: "What is churn costing us, and what is the return on acting?",
+    answer: () => {
+      const b = base();
+      return `Churn puts <b>${PKRs(D.kpis.revenue_at_risk_pkr)}</b> of revenue at risk every month. A targeted offer to the highest-risk 10% costs about <b>${PKRs(b.cost)}</b> and protects about <b>${PKRs(b.protectedRev)}</b>: a net gain of <b>${PKRs(b.net)}</b> a month. The same offer sent at random would <b>lose ${PKRs(-b.rNet)}</b>.`;
+    },
+    stats: () => {
+      const b = base();
+      return [stat("Revenue at risk, per year", PKRs(D.kpis.revenue_at_risk_pkr * 12), "if nothing is done", "bad"),
+              stat("Return on a targeted campaign", (b.roi * 100).toFixed(0) + "%", "net gain divided by the cost of the offer", b.roi >= 0 ? "good" : "bad"),
+              stat("Cost per customer kept", PKR(b.cost / b.saved), "discount cost divided by customers retained")];
+    },
+    visual: () => `<h3>Net monthly gain by how many customers we contact</h3><p class="muted small">Targeting by the model versus choosing customers at random, with the default assumptions (30% saved, 15% off, 50% uptake).</p><div class="chart-box"><canvas id="ucChart" aria-label="Net gain by reach"></canvas></div>`,
+    after: () => campaignChart("ucChart", DEFAULT),
+    recs: () => [["Start small: the top 10% only", "Returns fall as the campaign widens, because lower-risk customers would mostly have stayed anyway."],
+                 ["Measure the real save rate with a control group", "Hold back a random 10% of the target list. Without this, the 30% save rate is an assumption, not a fact."],
+                 ["Avoid blanket discounts", "Discount-driven customers churn regardless; offer value (content, data bundles) instead of price cuts."]],
+    links: [["Open the campaign planner", "#/planner"], ["Can we trust the numbers?", "#/trust"]],
+  },
+  retention: {
+    who: "For the Head of Retention", q: "Who should we contact this week, and with what?",
+    answer: () => `Start with the <b>${NUM(D.kpis.high_risk_subscribers)}</b> highest-risk customers. They carry <b>${PKRs(D.kpis.high_risk_revenue_at_risk_pkr)}</b> a month at risk, and they fall into clear groups, each needing a <b>different conversation</b>, not the same discount.`,
+    stats: () => [stat("Customers to contact first", NUM(D.kpis.high_risk_subscribers), "the highest-risk 10%"),
+                  stat("Their chance of leaving", PCT(D.deciles[0].avg_score), "on average, vs " + PCT(D.kpis.expected_churn_rate) + " overall", "bad"),
+                  stat("Real leavers reached", (D.model.lift_top10).toFixed(1) + "×", "more than contacting people at random", "good")],
+    visual: () => `<h3>The groups, and the conversation each needs</h3><div class="grid g2" style="margin-top:12px">` +
+      D.personas.filter(p => p.high_risk > 50).map(p => `<div class="card" style="box-shadow:none">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><h3>${esc(p.persona)}</h3><span class="tag high">${NUM(p.high_risk)} high-risk</span></div>
+        <p class="muted small" style="margin:4px 0 10px">${esc(p.description)}</p><p style="margin:0">${esc(PLAY[p.persona])}</p></div>`).join("") + `</div>`,
+    recs: () => [["Work the list from the top", "The contact list is ordered by chance of leaving, with the main reason and a suggested action for each customer."],
+                 ["Match the message to the group", "Payment help, a quality apology or a content reminder will work better than one generic offer."],
+                 ["Keep a person in the loop", "Every suggestion needs approval; nothing is sent automatically."]],
+    links: [["Open the contact list", "#/contact"], ["Read the weekly briefing", "#/briefing"]],
+  },
+  content: {
+    who: "For the Head of Content", q: "Which shows are keeping or losing our viewers?",
+    answer: () => {
+      const c = [...D.content].filter(x => x.fans_whose_title_ended).sort((a, b) => b.high_risk_waiting - a.high_risk_waiting);
+      const soon = [...c].sort((a, b) => a.next_release_in_days - b.next_release_in_days)[0];
+      return `<b>${NUM(c[0].high_risk_waiting)}</b> high-risk ${c[0].genre.toLowerCase()} fans finished the <b>${esc(c[0].ended_title)}</b> and must wait <b>${c[0].next_release_in_days} days</b> for the ${esc(c[0].next_title)}. ${soon.genre} fans, with something new in ${soon.next_release_in_days} days, are far safer. <b>Gaps between big releases drive churn.</b>`;
+    },
+    stats: () => {
+      const c = D.content.filter(x => x.fans_whose_title_ended);
+      const long = [...c].sort((a, b) => b.next_release_in_days - a.next_release_in_days)[0];
+      return [stat("Fans waiting for their next show", NUM(c.reduce((a, x) => a + x.fans_whose_title_ended, 0)), "their followed title has just ended"),
+              stat("Of them, high-risk", NUM(c.reduce((a, x) => a + x.high_risk_waiting, 0)), "likely to leave before the next release", "bad"),
+              stat("Longest wait", long.next_release_in_days + " days", long.genre + ": " + esc(long.next_title))];
+    },
+    visual: () => `<h3>High-risk fans waiting, by genre</h3><p class="muted small">Fans whose followed title just ended and who are now in the highest-risk group.</p>` +
+      bars(D.content.filter(c => c.fans_whose_title_ended).sort((a, b) => b.high_risk_waiting - a.high_risk_waiting).map(c => ({
+        name: c.genre, sub: `next: ${c.next_title} in ${c.next_release_in_days} days`, value: c.high_risk_waiting, cls: c.next_release_in_days >= 14 ? "bad" : "" })), { fmt: v => NUM(v) }),
+    recs: () => [["Fill the sports gap now", "Highlights, classic matches and a countdown to the next event, sent to waiting fans this week."],
+                 ["Announce release dates early", "Fans who know something they like is coming are much less likely to leave."],
+                 ["Widen narrow viewers", "Customers who watch only one category are riskier; recommend one related category to each."]],
+    links: [["See all risk by genre", "#/risk"], ["Read the weekly briefing", "#/briefing"]],
+  },
+  product: {
+    who: "For the Head of Product", q: "Which app and streaming problems drive people away?",
+    answer: () => {
+      const q = D.personas.find(p => p.persona === "Frustrated by quality");
+      const net = D.segments.network, g3 = net.find(n => n.segment === "3G"), wifi = net.find(n => n.segment === "WiFi");
+      return `<b>${NUM(q.subscribers)}</b> customers have had a poor experience (buffering, crashes, slow starts or an angry support ticket); <b>${NUM(q.high_risk)}</b> of them are high-risk. Customers on <b>3G</b> leave at <b>${PCT(g3.avg_risk, 1)}</b>, against ${PCT(wifi.avg_risk, 1)} on WiFi.`;
+    },
+    stats: () => {
+      const q = D.personas.find(p => p.persona === "Frustrated by quality");
+      const exp = D.theme_summary.find(t => t.theme === "Experience"), sup = D.theme_summary.find(t => t.theme === "Support");
+      return [stat("Customers frustrated by quality", NUM(q.subscribers), PKRs(q.revenue_at_risk_pkr) + " a month at risk"),
+              stat("High-risk with a bad support experience", PCT(sup ? sup.share : 0), "of the highest-risk group", "bad"),
+              stat("High-risk with app problems as a main reason", PCT(exp ? exp.share : 0), "smaller than content or payment issues")];
+    },
+    visual: () => `<h3>Chance of leaving by network and device</h3>` +
+      bars([...D.segments.network.map(s => ({ name: s.segment, sub: "network", value: s.avg_risk })),
+            ...D.segments.device.map(s => ({ name: s.segment, sub: "device", value: s.avg_risk }))].sort((a, b) => b.value - a.value), { fmt: v => PCT(v, 1) }),
+    recs: () => [["Start videos at a lower quality on slow networks", "Slow starts (over 4 seconds) clearly raise churn, and 3G users suffer most."],
+                 ["Reply to angry tickets within 24 hours", "A negative support ticket is one of the strongest single warning signs."],
+                 ["Be honest about scale", "App problems matter, but content gaps and payment failures affect far more high-risk customers."]],
+    links: [["See where the risk is", "#/risk"], ["Open the contact list", "#/contact"]],
+  },
+  billing: {
+    who: "For Billing & Partnerships", q: "Are payment failures costing us subscribers?",
+    answer: () => {
+      const p = D.personas.find(x => x.persona === "Payment-troubled"), ch = D.segments.payment_channel[0];
+      return `Yes. <b>${NUM(p.subscribers)}</b> customers have repeated failed or low-balance renewals; <b>${NUM(p.high_risk)}</b> are high-risk, carrying <b>${PKRs(p.revenue_at_risk_pkr)}</b> a month. These customers want to stay; <b>the bill is the problem</b>. ${esc(ch.segment)} is the riskiest payment channel.`;
+    },
+    stats: () => {
+      const p = D.personas.find(x => x.persona === "Payment-troubled"), t = D.theme_summary.find(x => x.theme === "Payment");
+      return [stat("Customers with repeated billing failures", NUM(p.subscribers), "failed or low-balance renewals"),
+              stat("Revenue at risk from them", PKRs(p.revenue_at_risk_pkr), "per month", "bad"),
+              stat("High-risk with a payment reason", PCT(t ? t.share : 0), "of the highest-risk group")];
+    },
+    visual: () => `<h3>Chance of leaving by payment channel</h3>` +
+      bars(D.segments.payment_channel.map(s => ({ name: s.segment, sub: PKRs(s.revenue_at_risk_pkr) + " at risk", value: s.avg_risk })), { fmt: v => PCT(v, 1) }),
+    recs: () => [["Renew after the customer tops up", "Agree with operators to retry renewal just after the usual recharge, not before it."],
+                 ["Remind before renewal", "A short balance reminder a day before renewal prevents avoidable failures."],
+                 ["Offer a fallback", "Let customers add a wallet as a backup payment method."]],
+    links: [["See where the risk is", "#/risk"], ["Open the campaign planner", "#/planner"]],
+  },
+};
+
+// ---------- pages ----------
+function pageHome() {
+  const k = D.kpis, b = base();
+  return `
+  <section class="hero">
+    <div>
+      <p class="eyebrow">Week ending ${today}</p>
+      <h1><span class="hl">${NUM(k.expected_churners)} customers</span> are likely to leave in the next 30 days.</h1>
+      <p class="lead">That puts <b>${PKRs(k.revenue_at_risk_pkr)}</b> of monthly revenue at risk. We know who they are, why they are leaving, and what is most likely to keep them.</p>
+      <div class="actions-row"><a class="btn" href="#/briefing">Read this week's briefing</a><a class="btn ghost" href="#/contact">See who to contact</a></div>
+    </div>
+    <div class="hero-panel" aria-label="If we act this week">
+      <div class="label">If we contact the highest-risk 10% this week</div>
+      <div class="big">${PKRs(b.net)}</div>
+      <div class="label">expected net gain per month, after the cost of the offer</div>
+      <div class="row"><span>Customers kept</span><b>${NUM(b.saved)}</b></div>
+      <div class="row"><span>Revenue protected</span><b>${PKRs(b.protectedRev)}</b></div>
+      <div class="row"><span>Cost of the offer</span><b>${PKRs(b.cost)}</b></div>
+    </div>
+  </section>
+
+  <section class="section grid g4">
+    ${stat("Customers analysed", NUM(k.subscribers), "every paying customer, scored weekly")}
+    ${stat("Likely to leave", NUM(k.expected_churners), PCT(k.expected_churn_rate, 1) + " of customers, next 30 days")}
+    ${stat("Monthly revenue at risk", PKRs(k.revenue_at_risk_pkr), "about " + PKRs(k.revenue_at_risk_pkr * 12) + " a year", "bad")}
+    ${stat("Highest-risk group", NUM(k.high_risk_subscribers), PKRs(k.high_risk_revenue_at_risk_pkr) + " of the risk")}
+  </section>
+
+  <section class="section">
+    <div class="section-head"><div><h2>What brings you here?</h2><p>Pick your question. Each answer takes a minute to read and ends with clear next steps.</p></div></div>
+    <div class="grid g3">
+      ${Object.entries(USE_CASES).map(([id, u]) => `
+        <a class="role" href="#/use/${id}">
+          <span class="icon">${ICONS[id]}</span>
+          <span class="who">${u.who.replace("For the ", "").replace("For ", "")}</span>
+          <span class="q">${u.q}</span>
+          <span class="go">Get the answer &rarr;</span>
+        </a>`).join("")}
+    </div>
+  </section>
+
+  <section class="section grid g2">
+    <div class="card">
+      <h2>Why customers are leaving</h2>
+      <p class="muted small" style="margin-top:6px">Among the 10,000 highest-risk customers. A customer can have more than one reason.</p>
+      ${themeBars()}
+    </div>
+    <div class="card">
+      <h2>How this works, in one minute</h2>
+      <ol class="recs" style="margin-top:16px">
+        <li><div><b>Every customer gets a score</b><span>The chance they will cancel in the next 30 days, based on how they watch, pay and use the app.</span></div></li>
+        <li><div><b>Every score comes with reasons</b><span>In plain words, such as "inactive for 11 days" or "4 failed payments".</span></div></li>
+        <li><div><b>An AI writes the weekly briefing</b><span>Using only our numbers. Every sentence is checked twice before you see it.</span></div></li>
+        <li><div><b>People decide</b><span>The system suggests; the team approves. Nothing is sent to customers automatically.</span></div></li>
+      </ol>
+    </div>
+  </section>`;
 }
 
-function renderSim() {
-  const k = +sTop.value, save = sSave.value / 100, disc = sDisc.value / 100, take = sTake.value / 100;
-  vTop.textContent = `${k * 10}% (${NUM(k * D.kpis.subscribers / 10)} subscribers)`;
-  vSave.textContent = sSave.value + "%"; vDisc.textContent = sDisc.value + "%"; vTake.textContent = sTake.value + "%";
-  const r = simulate(k, save, disc, take);
-  document.getElementById("simOut").innerHTML = [
-    ["Contacted", NUM(r.contacted), "subscribers"], ["Leavers reached", NUM(r.leavers), PCT(r.leavers / r.contacted) + " of those contacted"],
-    ["Retained", NUM(r.saved), "subscribers"], ["Revenue retained", PKR(r.revSaved), "per month"],
-    ["Cost of offer", PKR(r.cost), "per month"], ["Net benefit", PKR(r.net), r.net >= 0 ? "positive return" : "negative return", r.net >= 0 ? "pos" : "neg"],
-  ].map(([l, v, n, c]) => `<div class="kpi ${c || ""}"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
-  const xs = [...Array(10).keys()].map(i => i + 1);
-  const sims = xs.map(x => simulate(x, save, disc, take));
-  chart("simChart", {
+function pageUseCase(id) {
+  const u = USE_CASES[id];
+  if (!u) return pageHome();
+  return `
+  <nav class="crumb" aria-label="Breadcrumb"><a href="#/">Home</a> &rsaquo; ${u.who}</nav>
+  <p class="eyebrow">${u.who}</p>
+  <h1>${u.q}</h1>
+  <div class="answer"><span class="label">The short answer</span>${u.answer()}</div>
+  <section class="section grid g3" style="margin-top:24px">${u.stats().join("")}</section>
+  <section class="section card">${u.visual()}</section>
+  <section class="section card">
+    <h2>What we recommend</h2>
+    <ol class="recs" style="margin-top:18px">${u.recs().map(([t, d]) => `<li><div><b>${t}</b><span>${d}</span></div></li>`).join("")}</ol>
+    <div class="actions-row">${u.links.map(([t, h], i) => `<a class="btn ${i ? "ghost" : ""}" href="${h}">${t} &rarr;</a>`).join("")}</div>
+  </section>
+  <section class="section"><h2 style="font-size:20px">Other questions</h2>
+    <div class="chips" style="margin-top:12px">${Object.entries(USE_CASES).filter(([k]) => k !== id).map(([k, x]) => `<a class="chip" href="#/use/${k}" style="text-decoration:none">${x.who.replace("For the ", "").replace("For ", "")}: ${x.q}</a>`).join("")}</div>
+  </section>`;
+}
+
+// ---- weekly briefing ----
+const SPLIT = /(?<=[.!?\]])\s+(?=[A-Z])/;
+const stripCites = s => s.replace(/\s*\[[^\]]*\]/g, "");
+const okFinal = c => (c.ok_final !== undefined ? c.ok_final : c.ok);
+function renderSentence(text, check) {
+  const ids = ((text.match(/\[([^\]]*)\]/g) || []).join(",").match(/F\d+/g) || []).map(f => f.slice(1));
+  const ok = check ? okFinal(check) : true;
+  let body = esc(stripCites(text)).trim();
+  if (!/[.!?]$/.test(body)) body += ".";
+  return `<span class="${ok ? "" : "flagged"}" ${ok ? "" : 'title="This statement did not pass our checks"'}>${body}<sup>${ids.join(",")}</sup></span>`;
+}
+function pageBriefing() {
+  return `
+  <div class="brief">
+    <p class="eyebrow">Weekly briefing &middot; ${today}</p>
+    <h1 id="briefTitle"></h1>
+    <div class="brief-meta" id="briefMeta"></div>
+    <div class="memo" id="memo"></div>
+    <div class="actions-row" style="align-items:center;justify-content:space-between">
+      <label class="toggle"><input type="checkbox" id="srcToggle"> Show which figure each sentence comes from</label>
+      <button class="btn small" id="regen" type="button">Write a fresh briefing</button>
+    </div>
+  </div>
+  <details class="more" id="sourcesBox"><summary>The figures the AI was given</summary><div class="inner">
+    <p class="muted small">The AI sees only these totals, never individual customers' names, numbers or IDs.</p><ol class="sources-list" id="facts"></ol></div></details>
+  <details class="more"><summary>How was this checked?</summary><div class="inner" id="checks"></div></details>`;
+}
+function fillBriefing() {
+  const v = NOTE.verification, sents = v.sentences;
+  let i = 0;
+  const part = p => p.split(SPLIT).filter(Boolean).map(s => renderSentence(s, sents[i++])).join(" ");
+  $("#briefTitle").textContent = NOTE.headline;
+  $("#memo").innerHTML = NOTE.paragraphs.map(p => `<p>${part(p)}</p>`).join("") +
+    `<h3>What to do this week</h3><ol>${(NOTE.actions || []).map(a => `<li>${part(a)}</li>`).join("")}</ol>`;
+  const flagged = v.flagged_final ?? v.flagged, live = NOTE.meta.mode === "live";
+  $("#briefMeta").innerHTML = !live ? `<span class="check-badge bad">Template briefing: no AI key configured</span>`
+    : flagged === 0 ? `<span class="check-badge">&#10003; Every statement checked against our data</span><span class="muted small">Written by AI, checked twice: by code and by a second AI</span>`
+    : `<span class="check-badge bad">${flagged} statement${flagged > 1 ? "s" : ""} did not pass our checks and ${flagged > 1 ? "are" : "is"} highlighted</span>`;
+  $("#facts").innerHTML = FACTS.map(f => `<li>${esc(f.text)}</li>`).join("");
+  const t = NOTE.trap_test, j = v.judge_meta, m = NOTE.meta, total = m.total_cost_usd ?? m.cost_usd;
+  $("#checks").innerHTML = `
+    <ul class="check-list">
+      <li><span class="tag ok">Check 1</span><div><b>Numbers check (code).</b> Every sentence must point to one of the figures above, and every number in it must appear in that figure. ${v.total - v.flagged} of ${v.total} sentences passed.</div></li>
+      <li><span class="tag ok">Check 2</span><div><b>Meaning check (a second AI).</b> A different AI model${j ? ` (${esc(j.model)})` : ""} reads each sentence next to its figures and confirms the meaning is right, not just the numbers. ${j ? sents.filter(s => s.judge && s.judge.verdict === "faithful").length + " of " + v.total + " sentences confirmed." : "Not available on this run."}</div></li>
+      <li><span class="tag ok">Repair</span><div><b>One chance to correct.</b> If either check objects, the AI is told exactly what is wrong and rewrites once. ${NOTE.attempts && NOTE.attempts.length > 1 ? "This briefing needed one correction." : "This briefing passed first time."}</div></li>
+      ${t && t.details ? `<li><span class="tag ok">Tested</span><div><b>Do the checks work?</b> We planted ${t.planted} false statements. The two checks together caught <b>${t.caught_both} of ${t.planted}</b>, including ones with correct numbers but wrong meaning.</div></li>` : ""}
+      <li><span class="tag watch">Cost</span><div>This briefing cost <b>$${total.toFixed(4)}</b> (about PKR ${(total * 280).toFixed(2)}) and took ${m.seconds} seconds to write.</div></li>
+    </ul>
+    <details style="margin-top:12px"><summary class="small muted" style="cursor:pointer">Sentence-by-sentence audit</summary>
+      <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>Statement</th><th>Numbers</th><th>Meaning</th></tr></thead><tbody>
+      ${sents.map(s => `<tr><td>${esc(stripCites(s.sentence))}</td><td><span class="tag ${s.ok ? "ok" : "no"}">${s.ok ? "Passed" : "Failed"}</span></td>
+        <td><span class="tag ${!s.judge || ["faithful", "unchecked"].includes(s.judge.verdict) ? "ok" : "no"}">${s.judge ? esc(s.judge.verdict) : "n/a"}</span></td></tr>`).join("")}
+      </tbody></table></div></details>`;
+  $("#srcToggle").onchange = e => $("#memo").classList.toggle("show-sources", e.target.checked);
+  $("#regen").onclick = regenerate;
+}
+async function regenerate(e) {
+  const b = e.target; b.disabled = true; b.textContent = "Writing… about 5 seconds";
+  try {
+    const r = await fetch("/api/weekly_note", { method: "POST" });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    NOTE = { ...j.note, trap_test: NOTE.trap_test }; FACTS = j.facts; fillBriefing();
+  } catch (err) {
+    $("#briefMeta").insertAdjacentHTML("beforeend", `<span class="check-badge bad">Could not write a new briefing: ${esc(err.message.slice(0, 80))}</span>`);
+  } finally { b.disabled = false; b.textContent = "Write a fresh briefing"; }
+}
+
+// ---- who to contact ----
+let contactState = { persona: "", q: "", shown: 25, selected: null };
+function pageContact() {
+  const groups = D.personas.filter(p => D.watchlist.some(w => w.persona === p.persona));
+  return `
+  <div class="section-head" style="margin-bottom:22px"><div><p class="eyebrow">Who to contact</p><h1>The 500 customers most likely to leave</h1>
+    <p>Ordered by their chance of leaving. Select a customer to see why, and what to say. Every suggestion needs a person's approval.</p></div></div>
+  <div class="toolbar">
+    <div class="chips" role="group" aria-label="Filter by group">
+      <button class="chip" type="button" data-persona="" aria-pressed="true">Everyone</button>
+      ${groups.map(p => `<button class="chip" type="button" data-persona="${esc(p.persona)}" aria-pressed="false">${esc(p.persona)}</button>`).join("")}
+    </div>
+    <input class="search" id="q" type="search" placeholder="Find a customer ID" aria-label="Find a customer ID">
+  </div>
+  <div class="contact-layout">
+    <div class="card" style="padding:8px 8px 14px"><div class="table-wrap"><table>
+      <thead><tr><th>Customer</th><th>Chance of leaving</th><th>Main reason</th></tr></thead><tbody id="rows"></tbody></table></div>
+      <div style="text-align:center;margin-top:10px"><button class="btn ghost small" id="more" type="button">Show more</button></div></div>
+    <aside class="card panel-sticky" id="person" aria-live="polite"></aside>
+  </div>`;
+}
+function contactRows() {
+  const s = contactState;
+  return D.watchlist.filter(w => (!s.persona || w.persona === s.persona) && (!s.q || w.id.includes(s.q.toUpperCase())));
+}
+function fillContact() {
+  const rows = contactRows(), s = contactState;
+  $("#rows").innerHTML = rows.slice(0, s.shown).map(w => {
+    const [lab, cls] = riskLabel(w.score);
+    return `<tr class="clickable ${s.selected === w.id ? "selected" : ""}" tabindex="0" data-id="${w.id}">
+      <td><div class="cell-main">${w.id}</div><div class="cell-sub">${esc(w.persona)} &middot; ${esc(w.plan)}</div></td>
+      <td><span class="tag ${cls}">${lab}</span> <span class="cell-sub">${PCT(w.score)}</span></td>
+      <td>${w.reasons[0] ? esc(w.reasons[0].text) : "No single main reason"}</td></tr>`;
+  }).join("") || `<tr><td colspan="3" class="muted">No customers match.</td></tr>`;
+  $("#more").style.display = rows.length > s.shown ? "" : "none";
+  document.querySelectorAll("#rows tr.clickable").forEach(tr => {
+    const pick = () => { contactState.selected = tr.dataset.id; fillContact(); person(tr.dataset.id); };
+    tr.onclick = pick; tr.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
+  });
+  if (!s.selected && rows[0]) person(rows[0].id);
+}
+function person(id) {
+  const w = D.watchlist.find(x => x.id === id), [lab, cls] = riskLabel(w.score), top = w.reasons[0];
+  const col = w.score >= 0.5 ? css("--bad") : css("--warn");
+  $("#person").innerHTML = `
+    <p class="eyebrow">Customer ${w.id}</p>
+    <div class="person-head">
+      <div class="ring" style="background:conic-gradient(${col} ${w.score * 360}deg, var(--line-2) 0)"><span>${PCT(w.score)}</span></div>
+      <div><span class="tag ${cls}">${lab} risk</span><p style="margin:8px 0 0">${(w.score / D.kpis.expected_churn_rate).toFixed(1)}&times; more likely to leave than the average customer.</p>
+      <p class="muted small" style="margin:4px 0 0">${esc(w.plan)} plan &middot; ${esc(w.channel)} &middot; ${esc(w.genre)} fan &middot; PKR ${w.revenue}/month</p></div>
+    </div>
+    <h3 style="margin-bottom:10px">Why they may leave</h3>
+    <ul class="reason-list">${w.reasons.map(r => `<li>${esc(r.text)} <small>&middot; ${esc(THEME[r.group]?.short || r.group)}</small></li>`).join("") || "<li>No single main reason.</li>"}</ul>
+    ${top ? `<div class="next-step"><b>Suggested next step</b>${esc(ACTION[top.code] || PLAY[w.persona])}<div class="muted small" style="margin-top:6px">Group: ${esc(w.persona)}. Needs approval before anything is sent.</div></div>` : ""}
+    <details style="margin-top:16px"><summary class="small" style="cursor:pointer;font-weight:600">Compared with a typical customer</summary>
+      <table style="margin-top:8px"><tbody>${COMPARE.map(([k, l, f]) => `<tr><td>${l}</td><td class="num"><b>${f(w.facts[k])}</b></td><td class="num muted">typical ${f(D.population_avg[k])}</td></tr>`).join("")}</tbody></table></details>`;
+}
+function wireContact() {
+  document.querySelectorAll("[data-persona]").forEach(b => b.onclick = () => {
+    document.querySelectorAll("[data-persona]").forEach(x => x.setAttribute("aria-pressed", x === b));
+    Object.assign(contactState, { persona: b.dataset.persona, shown: 25, selected: null }); fillContact();
+  });
+  $("#q").oninput = e => { Object.assign(contactState, { q: e.target.value.trim(), shown: 25, selected: null }); fillContact(); };
+  $("#more").onclick = () => { contactState.shown += 25; fillContact(); };
+  fillContact();
+}
+
+// ---- campaign planner ----
+let plan = { ...DEFAULT };
+function pagePlanner() {
+  const chip = (key, val, label) => `<button class="chip" type="button" data-${key}="${val}" aria-pressed="${plan[key] === val}">${label}</button>`;
+  return `
+  <div class="section-head" style="margin-bottom:22px"><div><p class="eyebrow">Campaign planner</p><h1>Will a retention offer pay for itself?</h1>
+    <p>Choose who to contact and what to offer. The model supplies how many of them are likely to leave; the other assumptions are yours.</p></div></div>
+  <div class="planner">
+    <div class="card">
+      <div class="control"><span class="q">Who do we contact?</span><div class="help">The customers with the highest chance of leaving.</div>
+        <div class="chips" role="group" aria-label="Reach">${[1, 2, 3, 5].map(k => chip("k", k, `Top ${k * 10}%`)).join("")}</div></div>
+      <div class="control"><span class="q">What do we offer?</span><div class="help">A discount on one month.</div>
+        <div class="chips" role="group" aria-label="Discount">${[0, 0.1, 0.15, 0.2, 0.3].map(d => chip("disc", d, d ? (d * 100) + "% off" : "No discount")).join("")}</div></div>
+      <div class="control"><label for="save">How many of the likely leavers will we keep? <span class="range-val" id="saveV"></span></label>
+        <div class="help">Industry campaigns typically keep 20 to 40%. Measure it with a control group.</div><input type="range" id="save" min="5" max="60" step="5"></div>
+      <div class="control"><label for="take">How many who stay will use the discount? <span class="range-val" id="takeV"></span></label>
+        <div class="help">Some customers would have stayed anyway and still use the offer.</div><input type="range" id="take" min="10" max="100" step="10"></div>
+    </div>
+    <div class="card">
+      <div class="verdict" id="verdict"></div>
+      <div class="grid g2" id="planStats"></div>
+      <div class="chart-box"><canvas id="planChart" aria-label="Net monthly gain by reach, model versus random"></canvas></div>
+      <p class="muted small" style="margin-top:10px">Solid line: contacting customers chosen by the model. Dashed line: the same campaign sent to customers chosen at random.</p>
+    </div>
+  </div>`;
+}
+function campaignChart(id, p) {
+  const xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], sims = xs.map(x => simulate(x, p.save, p.disc, p.take));
+  newChart(id, {
     type: "line",
     data: { labels: xs.map(x => `Top ${x * 10}%`), datasets: [
-      { label: "Targeted by the model", data: sims.map(s => s.net), borderColor: css("--navy"), backgroundColor: css("--navy"), borderWidth: 2,
-        pointRadius: xs.map(x => (x === k ? 5 : 2)) },
-      { label: "Chosen at random", data: sims.map(s => s.rNet), borderColor: css("--slate"), borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 }] },
-    options: { maintainAspectRatio: false, plugins: { legend: { position: "bottom" },
-               tooltip: { callbacks: { label: c => `${c.dataset.label}: ${PKR(c.raw)}` } } },
-               scales: { x: { grid: { display: false } },
-                         y: { title: { display: true, text: "Net benefit, PKR per month" }, ticks: { callback: v => (v / 1000) + "k" } } } },
+      { label: "Chosen by the model", data: sims.map(s => s.net), borderColor: css("--brand-2"), backgroundColor: css("--brand-2"), borderWidth: 2.5, tension: .3, pointRadius: xs.map(x => (x === p.k ? 6 : 2)) },
+      { label: "Chosen at random", data: sims.map(s => s.rNet), borderColor: css("--muted"), borderDash: [5, 5], borderWidth: 1.5, tension: .3, pointRadius: 0 }] },
+    options: { maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { boxWidth: 12 } },
+      tooltip: { callbacks: { label: c => `${c.dataset.label}: ${PKRs(c.raw)} a month` } } },
+      scales: { x: { grid: { display: false } }, y: { ticks: { callback: v => PKRs(v) } } } },
   });
-  const best = sims.reduce((b, s, i) => (s.net > sims[b].net ? i : b), 0);
-  document.getElementById("simNote").textContent =
-    `On these assumptions the most profitable reach is the top ${(best + 1) * 10}% (net ${PKR(sims[best].net)} per month). ` +
-    `The same campaign aimed at randomly chosen subscribers would return ${PKR(r.rNet)}; targeting by the model adds ${PKR(r.net - r.rNet)} per month.`;
 }
-const [sTop, sSave, sDisc, sTake, vTop, vSave, vDisc, vTake] =
-  ["sTop", "sSave", "sDisc", "sTake", "vTop", "vSave", "vDisc", "vTake"].map(id => document.getElementById(id));
-[sTop, sSave, sDisc, sTake].forEach(s => s.addEventListener("input", renderSim));
-
-// ---------- model validation ----------
-const SHORT = { "Logistic regression (baseline)": "Logistic", "Gradient boosting": "Boosting", "Perfect model (ceiling)": "Ceiling" };
-function renderModel() {
-  const m = D.model, comp = m.comparison, ceil = m.ceiling;
-  const cols = [...Object.keys(comp), "Perfect model (ceiling)"];
-  const get = (c, k) => (c === "Perfect model (ceiling)" ? ceil[k] : comp[c][k]);
-  const rows = [["AUC", "auc", v => v.toFixed(3)], ["Precision, top decile", "precision_top10", v => PCT(v, 1)],
-                ["Recall, top decile", "recall_top10", v => PCT(v, 1)], ["Lift, top decile", "lift_top10", v => v.toFixed(2) + "×"],
-                ["Brier score", "brier", v => v.toFixed(4)]];
-  document.getElementById("modelTable").innerHTML =
-    `<thead><tr><th>Measure</th>${cols.map(c => `<th class="num" title="${esc(c)}">${SHORT[c]}${c === m.name ? " *" : ""}</th>`).join("")}</tr></thead><tbody>` +
-    rows.map(([l, k, f]) => `<tr><td>${l}</td>${cols.map(c => `<td class="num">${f(get(c, k))}</td>`).join("")}</tr>`).join("") + "</tbody>";
-  const tRows = [["AUC of at least 0.75", m.auc.toFixed(3), m.targets["AUC >= 0.75"]],
-                 ["Top-decile precision of at least 40%", PCT(m.precision_top10, 1), m.targets["Precision top 10% >= 40%"]],
-                 ["Top band within 5 points of observed", `${PCT(m.top_band_predicted)} vs ${PCT(m.top_band_actual)}`, m.targets["Top band calibrated (within 5 pts)"]]];
-  document.getElementById("targets").innerHTML = `<thead><tr><th>Target</th><th class="num">Result</th><th>Status</th></tr></thead><tbody>` +
-    tRows.map(([a, b, ok]) => `<tr><td>${a}</td><td class="num">${b}</td><td>${ST(ok, "Met", "Not met")}</td></tr>`).join("") + "</tbody>";
-  document.getElementById("ceilingNote").innerHTML =
-    `* Model in use. Gradient boosting did not improve AUC by the required 0.01 (${comp["Gradient boosting"].auc} against ${comp[m.name].auc}), so the simpler and more explainable logistic regression was retained. ` +
-    `The ceiling is the score of a model that knows the true generating rules: AUC ${ceil.auc} and ${PCT(ceil.precision_top10, 1)} precision. ` +
-    `The model in use therefore attains <b>${PCT(m.auc / ceil.auc)} of the attainable AUC</b>, and the 40% precision target was not reachable on this data.`;
-
-  const cal = m.calibration;
-  const lim = Math.max(...cal.map(c => Math.max(c.predicted, c.actual))) * 1.1;
-  chart("calChart", {
-    type: "scatter",
-    data: { datasets: [
-      { label: "Model in use", data: cal.map(c => ({ x: c.predicted * 100, y: c.actual * 100 })), backgroundColor: css("--navy"),
-        borderColor: css("--navy"), pointRadius: 4, showLine: true, borderWidth: 1.5 },
-      { label: "Perfect calibration", data: [{ x: 0, y: 0 }, { x: lim * 100, y: lim * 100 }], showLine: true, borderDash: [4, 4],
-        borderColor: css("--slate"), borderWidth: 1, pointRadius: 0 }] },
-    options: { maintainAspectRatio: false, plugins: { legend: { position: "bottom" } },
-               scales: { x: { title: { display: true, text: "Predicted churn, %" } }, y: { title: { display: true, text: "Observed churn, %" } } } },
-  });
-
-  const NICE = { watch_change_pct: "Change in viewing (week)", watch_trend_8w_pct: "Viewing trend (8 weeks)", days_since_active: "Days inactive",
-                 completion_rate: "Completion rate", category_concentration: "One-category viewing", fav_content_ended: "Followed title ended",
-                 catalogue_match_titles: "Catalogue match", recs_ignored_30d: "Ignored recommendations", failed_renewals_30d: "Failed renewals",
-                 low_balance_renewals_30d: "Low balance at renewal", payment_switches_90d: "Payment method switches", buffering_errors_7d: "Buffering errors",
-                 app_crashes_7d: "App crashes", video_start_sec: "Video start time", login_failures_30d: "Login failures",
-                 plan_downgrades_90d: "Plan downgrades", past_cancellations: "Past cancellations", used_discount: "Discount history",
-                 support_tickets_30d: "Support tickets", ticket_negative: "Negative ticket", ticket_resolved: "Ticket resolved", tenure_days: "Tenure" };
-  document.getElementById("ruleTable").innerHTML =
-    `<thead><tr><th>Signal</th><th>True effect</th><th class="num">Model coefficient</th><th>Recovered</th></tr></thead><tbody>` +
-    D.rule_check.map(r => `<tr><td>${NICE[r.feature] || esc(r.feature)}</td><td>${r.true_effect}</td>
-      <td class="num">${r.model_coefficient > 0 ? "+" : ""}${r.model_coefficient.toFixed(3)}</td><td>${ST(r.matches, "Yes", "No")}</td></tr>`).join("") +
-    `</tbody><tfoot><tr><td>Recovered</td><td></td><td></td><td>${D.rule_check.filter(r => r.matches).length} of ${D.rule_check.length}</td></tr></tfoot>`;
+function fillPlanner() {
+  const r = simulate(plan.k, plan.save, plan.disc, plan.take);
+  $("#saveV").textContent = PCT(plan.save); $("#takeV").textContent = PCT(plan.take);
+  $("#save").value = plan.save * 100; $("#take").value = plan.take * 100;
+  $("#verdict").innerHTML = r.net >= 0
+    ? `Contacting <b style="color:inherit">${NUM(r.contacted)}</b> customers should keep about ${NUM(r.saved)} of them and return a net <b>${PKRs(r.net)}</b> a month.`
+    : `This campaign would <b class="neg">lose ${PKRs(-r.net)}</b> a month: the discount costs more than the revenue it protects.`;
+  $("#planStats").innerHTML = stat("Cost of the offer", PKRs(r.cost), "per month") + stat("Revenue protected", PKRs(r.protectedRev), NUM(r.saved) + " customers kept") +
+    stat("Net gain", PKRs(r.net), "after the cost of the offer", r.net >= 0 ? "good" : "bad") +
+    stat("Better than random by", PKRs(r.net - r.rNet), "per month, from targeting by risk");
+  charts.splice(0).forEach(c => c.destroy());
+  campaignChart("planChart", plan);
+}
+function wirePlanner() {
+  ["k", "disc"].forEach(key => document.querySelectorAll(`[data-${key}]`).forEach(b => b.onclick = () => {
+    plan[key] = +b.dataset[key];
+    document.querySelectorAll(`[data-${key}]`).forEach(x => x.setAttribute("aria-pressed", +x.dataset[key] === plan[key]));
+    fillPlanner();
+  }));
+  $("#save").oninput = e => { plan.save = e.target.value / 100; fillPlanner(); };
+  $("#take").oninput = e => { plan.take = e.target.value / 100; fillPlanner(); };
+  fillPlanner();
 }
 
-// ---------- load ----------
+// ---- where the risk is ----
+const SEG = { plan: "Plan", payment_channel: "Payment method", favourite_genre: "Favourite genre", signup_source: "How they joined", network: "Network", device: "Device", city: "City" };
+let segKey = "plan";
+function pageRisk() {
+  return `
+  <div class="section-head" style="margin-bottom:22px"><div><p class="eyebrow">Where the risk is</p><h1>Which customers are most likely to leave?</h1>
+    <p>Compare groups of customers by their chance of leaving and the money at stake.</p></div></div>
+  <div class="card">
+    <div class="chips" role="group" aria-label="Group customers by">${Object.entries(SEG).map(([k, l]) => `<button class="chip" type="button" data-seg="${k}" aria-pressed="${k === segKey}">${l}</button>`).join("")}</div>
+    <div id="segBars" style="margin-top:22px"></div>
+  </div>
+  <section class="section grid g2">
+    <div class="card"><h2>Customer groups</h2><p class="muted small" style="margin-top:6px">Each customer is placed in the first group that fits, starting with problems we can fix.</p>
+      <div class="table-wrap"><table><thead><tr><th>Group</th><th class="num">Customers</th><th class="num">At high risk</th><th class="num">Monthly revenue at risk</th></tr></thead><tbody>
+      ${D.personas.map(p => `<tr><td><div class="cell-main">${esc(p.persona)}</div><div class="cell-sub">${esc(p.description)}</div></td><td class="num">${NUM(p.subscribers)}</td><td class="num">${NUM(p.high_risk)}</td><td class="num">${PKRs(p.revenue_at_risk_pkr)}</td></tr>`).join("")}
+      </tbody></table></div></div>
+    <div class="card"><h2>Content timing</h2><p class="muted small" style="margin-top:6px">What each genre's fans just finished, and how long until something new.</p>
+      <div class="table-wrap"><table><thead><tr><th>Genre</th><th>Next release</th><th class="num">Fans waiting</th><th class="num">At high risk</th></tr></thead><tbody>
+      ${D.content.filter(c => c.fans_whose_title_ended).map(c => `<tr><td><div class="cell-main">${esc(c.genre)}</div><div class="cell-sub">${esc(c.ended_title)} ended ${c.ended_days_ago} days ago</div></td>
+        <td><div class="cell-main">${esc(c.next_title)}</div><div class="cell-sub">in ${c.next_release_in_days} days</div></td><td class="num">${NUM(c.fans_whose_title_ended)}</td><td class="num"><b>${NUM(c.high_risk_waiting)}</b></td></tr>`).join("")}
+      </tbody></table></div></div>
+  </section>`;
+}
+function fillRisk() {
+  const rows = D.segments[segKey];
+  $("#segBars").innerHTML = bars(rows.map(s => ({ name: s.segment, sub: `${NUM(s.subscribers)} customers · ${PKRs(s.revenue_at_risk_pkr)} a month at risk`, value: s.avg_risk })),
+    { fmt: v => PCT(v, 1) }) + `<p class="muted small" style="margin-top:14px">Bars show the average chance of leaving in the next 30 days. The company average is ${PCT(D.kpis.expected_churn_rate, 1)}.</p>`;
+  document.querySelectorAll("[data-seg]").forEach(b => b.onclick = () => {
+    segKey = b.dataset.seg; document.querySelectorAll("[data-seg]").forEach(x => x.setAttribute("aria-pressed", x === b)); fillRisk();
+  });
+}
+
+// ---- can we trust it? ----
+function pageTrust() {
+  const m = D.model, flagged = Math.round(m.precision_top10 * 10), c = m.ceiling;
+  const met = Object.values(m.targets).filter(Boolean).length, tt = NOTE.trap_test;
+  return `
+  <div class="section-head" style="margin-bottom:22px"><div><p class="eyebrow">Can we trust it?</p><h1>How reliable are these numbers?</h1>
+    <p>Straight answers, including where the system falls short.</p></div></div>
+  <div class="grid g2">
+    <div class="card trust-card"><div class="q">How often is it right?</div>
+      <div class="people" aria-hidden="true">${Array.from({ length: 10 }, (_, i) => `<i class="${i < flagged ? "on" : ""}"></i>`).join("")}</div>
+      <p class="a">Of every <b>10 customers</b> we flag as highest-risk, about <b>${flagged}</b> really leave. That is <b>${m.lift_top10.toFixed(1)}&times; better</b> than picking customers at random, where only about 1 in 11 would.</p></div>
+    <div class="card trust-card"><div class="q">Are the percentages honest?</div><div class="big">${PCT(m.top_band_predicted)} &rarr; ${PCT(m.top_band_actual)}</div>
+      <p class="a">When it says the riskiest customers have about a ${PCT(m.top_band_predicted)} chance of leaving, ${PCT(m.top_band_actual)} actually do. <b>It is not over-confident.</b></p></div>
+    <div class="card trust-card"><div class="q">Can the AI briefing make things up?</div><div class="big">${tt ? tt.caught_both + " of " + tt.planted : "Checked"}</div>
+      <p class="a">Every sentence must point to our data and is checked twice, once by code and once by a second AI. When we planted false statements to test it, ${tt ? `it caught <b>${tt.caught_both} of ${tt.planted}</b>` : "the checks caught them"}.</p></div>
+    <div class="card trust-card"><div class="q">Did it meet the goals we set?</div><div class="big">${met} of ${Object.keys(m.targets).length}</div>
+      <p class="a">It met the goals for overall accuracy and honest percentages. It missed the goal that 4 in 10 flagged customers should leave; it reaches about 3 in 10. Even a perfect model would only reach ${PCT(c.precision_top10, 0)} on this data, so that goal was set too high.</p></div>
+  </div>
+  <section class="section card"><h2>What it does not do</h2>
+    <ul class="check-list" style="margin-top:10px">
+      <li><span class="tag watch">Demo</span><div>All customer records are <b>synthetic</b>. Before real use, the model must be retrained and re-tested on real data inside the company.</div></li>
+      <li><span class="tag watch">Reasons</span><div>Reasons show what goes <b>together</b> with leaving, not proof of cause.</div></li>
+      <li><span class="tag watch">People</span><div>It <b>recommends</b>; people decide. Nothing is sent to customers automatically.</div></li>
+      <li><span class="tag watch">Privacy</span><div>The AI only ever sees <b>totals</b>, never names, phone numbers or customer IDs.</div></li>
+      <li><span class="tag watch">Next</span><div>Two improvements need a real campaign first: predicting <b>when</b> someone will leave, and <b>who an offer actually changes</b>.</div></li>
+    </ul></section>
+  <details class="more"><summary>For analysts: technical results</summary><div class="inner">
+    <div class="table-wrap"><table><thead><tr><th>Measure</th>${Object.keys(m.comparison).map(n => `<th class="num">${n === m.name ? n + " (used)" : n}</th>`).join("")}<th class="num">Perfect model</th></tr></thead><tbody>
+      ${[["AUC (target 0.75)", "auc", v => v.toFixed(3)], ["Precision, top 10% (target 40%)", "precision_top10", v => PCT(v, 1)], ["Recall, top 10%", "recall_top10", v => PCT(v, 1)],
+         ["Lift, top 10%", "lift_top10", v => v.toFixed(2) + "×"], ["Brier score", "brier", v => v.toFixed(4)]].map(([l, k, f]) =>
+        `<tr><td>${l}</td>${Object.values(m.comparison).map(r => `<td class="num">${f(r[k])}</td>`).join("")}<td class="num">${f(c[k])}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="muted small" style="margin-top:10px">Held-out test set of 30,000 customers. Gradient boosting is used only if it improves AUC by 0.01 or more; it did not, so the more explainable logistic regression is used. ${D.rule_check.filter(r => r.matches).length} of ${D.rule_check.length} true rules built into the synthetic data were recovered.</p>
+    <div class="chart-box"><canvas id="calChart" aria-label="Calibration chart"></canvas></div>
+    <p class="muted small">Calibration: each point is a tenth of the test set; on the dashed line, predicted equals observed.</p>
+  </div></details>`;
+}
+function fillTrust() {
+  const cal = D.model.calibration, lim = Math.max(...cal.map(c => Math.max(c.predicted, c.actual))) * 110;
+  document.querySelector("details.more").addEventListener("toggle", function once() {
+    newChart("calChart", { type: "scatter", data: { datasets: [
+      { label: "Model", data: cal.map(c => ({ x: c.predicted * 100, y: c.actual * 100 })), backgroundColor: css("--brand-2"), borderColor: css("--brand-2"), showLine: true, pointRadius: 4 },
+      { label: "Perfect", data: [{ x: 0, y: 0 }, { x: lim, y: lim }], showLine: true, borderDash: [5, 5], borderColor: css("--muted"), pointRadius: 0 }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { position: "bottom" } },
+        scales: { x: { title: { display: true, text: "Predicted %" } }, y: { title: { display: true, text: "Actually left %" } } } } });
+    this.removeEventListener("toggle", once);
+  });
+}
+
+// ---------- router ----------
+const ROUTES = {
+  "": [pageHome, null, "Home"], briefing: [pageBriefing, fillBriefing, "Weekly briefing"], contact: [pageContact, wireContact, "Who to contact"],
+  planner: [pagePlanner, wirePlanner, "Campaign planner"], risk: [pageRisk, fillRisk, "Where the risk is"], trust: [pageTrust, fillTrust, "Can we trust it?"],
+};
+function route() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/");
+  charts.splice(0).forEach(c => c.destroy());
+  let title, after;
+  if (parts[0] === "use" && USE_CASES[parts[1]]) {
+    app.innerHTML = pageUseCase(parts[1]); after = USE_CASES[parts[1]].after; title = USE_CASES[parts[1]].who;
+  } else {
+    const [page, fill, t] = ROUTES[parts[0]] || ROUTES[""];
+    app.innerHTML = page(); after = fill; title = t;
+  }
+  const navKey = parts[0] === "use" ? "home" : (ROUTES[parts[0]] ? parts[0] || "home" : "home");
+  document.querySelectorAll(".main-nav a").forEach(a =>
+    a.dataset.route === navKey ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
+  document.title = `${title} · Churn Radar`;
+  if (after) after();
+  window.scrollTo({ top: 0, behavior: "instant" });
+  app.focus({ preventScroll: true });
+}
+window.addEventListener("hashchange", route);
+document.querySelector(".skip").addEventListener("click", e => { e.preventDefault(); app.focus(); });
+
 Promise.all(["data/dashboard.json", "data/weekly_note.json", "data/facts.json"].map(u => fetch(u).then(r => r.json())))
-  .then(([d, n, f]) => {
-    D = d; NOTE = n; FACTS = f.facts;
-    renderOverview(); renderNote(); renderWatchFilters(); renderWatch(); explain(D.watchlist[0].id); renderSim(); renderModel();
-  })
-  .catch(e => document.querySelector("main").insertAdjacentHTML("afterbegin", `<div class="card">The report data could not be loaded: ${esc(e.message)}</div>`));
+  .then(([d, n, f]) => { D = d; NOTE = n; FACTS = f.facts; route(); })
+  .catch(e => { app.innerHTML = `<div class="card">The report could not be loaded: ${esc(e.message)}</div>`; });

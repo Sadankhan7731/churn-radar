@@ -180,6 +180,48 @@
   "Marketing": 228,
   "Profile": 124
  },
+ "theme_summary": [
+  {
+   "theme": "Content",
+   "share": 0.765,
+   "people": 7652
+  },
+  {
+   "theme": "Viewing",
+   "share": 0.738,
+   "people": 7384
+  },
+  {
+   "theme": "Payment",
+   "share": 0.394,
+   "people": 3937
+  },
+  {
+   "theme": "Support",
+   "share": 0.345,
+   "people": 3453
+  },
+  {
+   "theme": "Plan history",
+   "share": 0.174,
+   "people": 1745
+  },
+  {
+   "theme": "Experience",
+   "share": 0.067,
+   "people": 667
+  },
+  {
+   "theme": "Marketing",
+   "share": 0.023,
+   "people": 228
+  },
+  {
+   "theme": "Profile",
+   "share": 0.012,
+   "people": 124
+  }
+ ],
  "personas": [
   {
    "persona": "Payment-troubled",

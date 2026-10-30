@@ -4,236 +4,50 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Churn Radar</title>
-  <meta name="description" content="Weekly retention intelligence report for a subscription streaming business. DATA722 Phase 2, synthetic data.">
+  <meta name="description" content="Who is likely to cancel, why, and what to do about it. A retention briefing for leadership. Demo built on synthetic data.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=4">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
 </head>
 <body>
-  <header class="masthead">
-    <div class="wrap mast-top">
-      <div class="mast-title">
-        <h1>Churn Radar</h1>
-        <p class="tagline">Weekly Retention Intelligence Report</p>
-      </div>
-      <div class="mast-meta">
-        <div>Reporting period: <b id="period"></b></div>
-        <div>Prepared for: <b>Head of Retention &amp; CRM</b></div>
-        <div class="notice">All subscriber records are synthetic</div>
-      </div>
+  <a class="skip" href="#app">Skip to content</a>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="#/" aria-label="Churn Radar home">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" stroke-width="2" opacity=".35"/>
+          <circle cx="16" cy="16" r="8.5" fill="none" stroke="currentColor" stroke-width="2" opacity=".6"/>
+          <path d="M16 16 L27 9" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+          <circle cx="22.5" cy="11.6" r="2.6" fill="var(--accent)"/>
+        </svg>
+        <span><b>Churn Radar</b><small>Retention briefing</small></span>
+      </a>
+      <span class="demo-pill" title="All customer records in this demo are made up; no real customer data is used.">Demo &middot; synthetic data</span>
     </div>
-    <nav class="wrap tabs" role="tablist">
-      <button class="tab active" data-tab="overview">Executive Summary</button>
-      <button class="tab" data-tab="note">Weekly Memorandum</button>
-      <button class="tab" data-tab="watchlist">Priority Contact List</button>
-      <button class="tab" data-tab="whatif">Campaign Scenarios</button>
-      <button class="tab" data-tab="model">Model Validation</button>
-      <button class="tab" data-tab="about">Methodology</button>
+    <nav class="wrap main-nav" aria-label="Main">
+      <a href="#/" data-route="home">Home</a>
+      <a href="#/briefing" data-route="briefing">Weekly briefing</a>
+      <a href="#/contact" data-route="contact">Who to contact</a>
+      <a href="#/planner" data-route="planner">Campaign planner</a>
+      <a href="#/risk" data-route="risk">Where the risk is</a>
+      <a href="#/trust" data-route="trust">Can we trust it?</a>
     </nav>
   </header>
 
-  <main class="wrap">
-    <!-- EXECUTIVE SUMMARY -->
-    <section id="overview" class="panel active">
-      <div class="section-title"><h2>Executive Summary</h2><p class="lead">Position of the subscriber base for the next 30 days</p></div>
-      <div class="kpis" id="kpis"></div>
-      <div>
-        <div class="card">
-          <h2>Content calendar and the fans waiting</h2>
-          <p class="hint">For each genre: the title that just ended, the next release, and how many of its followers are now at high risk.</p>
-          <div class="table-scroll"><table id="contentTable"></table></div>
-          <p class="hint small" id="contentNote"></p>
-        </div>
-        <div class="card">
-          <h2>Customer personas</h2>
-          <p class="hint">Rule-based groups, assigned in order of urgency: problems that can be fixed come first.</p>
-          <div class="table-scroll"><table id="personaTable"></table></div>
-        </div>
-      </div>
-      <div class="grid2">
-        <div class="card">
-          <h2>Principal drivers of churn risk</h2>
-          <p class="hint">Share of the high-risk decile in which each signal is among the three strongest reasons.</p>
-          <div class="chart-box"><canvas id="reasonsChart"></canvas></div>
-        </div>
-        <div class="card">
-          <div class="card-head">
-            <h2>Exposure by segment</h2>
-            <select id="segmentPick" aria-label="Segment">
-              <option value="plan">Plan</option>
-              <option value="payment_channel">Payment channel</option>
-              <option value="favourite_genre">Genre</option>
-              <option value="signup_source">Sign-up source</option>
-              <option value="network">Network</option>
-              <option value="device">Device</option>
-              <option value="city">City</option>
-            </select>
-          </div>
-          <p class="hint">Columns: monthly revenue at risk (PKR). Line: average probability of cancellation.</p>
-          <div class="chart-box"><canvas id="segmentChart"></canvas></div>
-        </div>
-      </div>
-      <div class="card">
-        <h2>Segment detail</h2>
-        <div class="table-scroll"><table id="segmentTable"></table></div>
-      </div>
-    </section>
-
-    <!-- WEEKLY MEMORANDUM -->
-    <section id="note" class="panel">
-      <div class="section-title"><h2>Weekly Memorandum</h2><p class="lead">Drafted by a language model, verified by code and by an independent model</p></div>
-      <div class="grid-memo">
-        <article class="card memo">
-          <dl class="memo-head">
-            <dt>To</dt><dd>Retention Team</dd>
-            <dt>From</dt><dd>Churn Radar &mdash; machine-drafted, machine-verified</dd>
-            <dt>Date</dt><dd id="memoDate"></dd>
-            <dt>Status</dt><dd id="memoStatus"></dd>
-          </dl>
-          <h2 class="memo-title" id="noteHeadline"></h2>
-          <div id="noteBody"></div>
-          <h3>Recommended actions for this week</h3>
-          <ol id="noteActions"></ol>
-          <div class="memo-actions">
-            <span>Superscripts refer to the numbered source facts. Hover any superscript to see both checks.</span>
-            <button id="regen" class="btn">Redraft live</button>
-          </div>
-        </article>
-        <aside>
-          <div class="card">
-            <h2>Verification statement</h2>
-            <div id="statement" class="statement"></div>
-            <div id="verifySummary"></div>
-          </div>
-          <div class="card">
-            <h2>Source facts</h2>
-            <p class="hint">The complete and only input to the model. Aggregates only; no subscriber identifiers, names or telephone numbers are transmitted (Phase 1, row 6b).</p>
-            <ol id="factList" class="sources"></ol>
-          </div>
-        </aside>
-      </div>
-      <div class="card">
-        <h2>Audit trail</h2>
-        <p class="hint">Each statement in the memorandum, the facts it cites, and the result of both independent checks.</p>
-        <div class="table-scroll"><table id="auditTable"></table></div>
-      </div>
-      <div class="grid2">
-        <div class="card">
-          <h2>Control test: detection of planted errors</h2>
-          <p class="hint">Five deliberately false statements are passed through the same checks. A control that detects nothing proves nothing.</p>
-          <div class="table-scroll"><table id="trapTable"></table></div>
-        </div>
-        <div class="card">
-          <h2>Run record</h2>
-          <p class="hint">Models, token usage, cost and latency for this memorandum.</p>
-          <div class="table-scroll"><table id="runTable" class="record"></table></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- PRIORITY CONTACT LIST -->
-    <section id="watchlist" class="panel">
-      <div class="section-title"><h2>Priority Contact List</h2><p class="lead">The 500 subscribers with the highest probability of cancelling, out of 100,000</p></div>
-      <div class="grid-watch">
-        <div class="card">
-          <div class="card-head">
-            <h2>Subscribers by risk</h2>
-            <div class="filters">
-              <input id="wSearch" placeholder="Search ID" aria-label="Search subscriber ID">
-              <select id="wPlan" aria-label="Plan"><option value="">All plans</option></select>
-              <select id="wChannel" aria-label="Channel"><option value="">All channels</option></select>
-              <select id="wPersona" aria-label="Persona"><option value="">All personas</option></select>
-            </div>
-          </div>
-          <p class="hint">Select a subscriber for the explanation. The model recommends; a member of the retention team decides (Phase 1, row 9a).</p>
-          <div class="table-scroll tall"><table id="watchTable"></table></div>
-        </div>
-        <div class="card sticky" id="explain"></div>
-      </div>
-    </section>
-
-    <!-- CAMPAIGN SCENARIOS -->
-    <section id="whatif" class="panel">
-      <div class="section-title"><h2>Campaign Scenarios</h2><p class="lead">Expected monthly outcome of a retention offer, in PKR</p></div>
-      <div class="grid-whatif">
-        <div class="card">
-          <h2>Assumptions</h2>
-          <label class="slider">Contact the top <b id="vTop"></b> by risk
-            <input type="range" id="sTop" min="1" max="10" value="1"></label>
-          <label class="slider">Save rate: <b id="vSave"></b> of contacted leavers are retained
-            <input type="range" id="sSave" min="5" max="60" step="5" value="30"></label>
-          <label class="slider">Offer: <b id="vDisc"></b> off one month
-            <input type="range" id="sDisc" min="0" max="50" step="5" value="15"></label>
-          <label class="slider">Uptake: <b id="vTake"></b> of retained subscribers redeem the offer
-            <input type="range" id="sTake" min="10" max="100" step="10" value="50"></label>
-          <p class="hint small">The commercial assumptions are the user's; the model supplies the expected number of leavers in each risk band.</p>
-        </div>
-        <div class="card">
-          <h2>Projected outcome</h2>
-          <div class="kpis small" id="simOut"></div>
-          <div class="chart-box"><canvas id="simChart"></canvas></div>
-          <p class="hint" id="simNote"></p>
-        </div>
-      </div>
-    </section>
-
-    <!-- MODEL VALIDATION -->
-    <section id="model" class="panel">
-      <div class="section-title"><h2>Model Validation</h2><p class="lead">Held-out test set of 30,000 subscribers, measured against targets fixed in Phase 1</p></div>
-      <div class="grid2">
-        <div class="card">
-          <h2>Model comparison</h2>
-          <div class="table-scroll"><table id="modelTable"></table></div>
-          <h3>Phase 1 targets</h3>
-          <div class="table-scroll"><table id="targets"></table></div>
-          <p class="hint" id="ceilingNote"></p>
-        </div>
-        <div class="card">
-          <h2>Calibration</h2>
-          <p class="hint">Each point is one tenth of the test set. On the diagonal, predicted churn equals observed churn; points far below it would mean the model is confidently wrong.</p>
-          <div class="chart-box"><canvas id="calChart"></canvas></div>
-        </div>
-      </div>
-      <div class="card">
-        <h2>Recovery of the true rules</h2>
-        <p class="hint">The synthetic data was generated from known rules. The model was never shown them; this table tests whether it found them.</p>
-        <div class="table-scroll"><table id="ruleTable"></table></div>
-      </div>
-    </section>
-
-    <!-- METHODOLOGY -->
-    <section id="about" class="panel">
-      <div class="section-title"><h2>Methodology</h2><p class="lead">What the system does on each run, and where it falls short</p></div>
-      <div class="grid2">
-        <div class="card">
-          <h2>Process</h2>
-          <ol class="flow">
-            <li><b>Score.</b> A logistic regression reads 39 signals per subscriber (viewing, content, payment, experience, plan history, marketing, support, profile) and estimates the probability of cancelling within 30 days.</li>
-            <li><b>Explain.</b> Each score is decomposed into its three strongest reasons, each tied to an observed value. Subscribers are also placed in one of six rule-based personas, and the release calendar shows which fans are waiting for what.</li>
-            <li><b>Aggregate.</b> Totals and shares are reduced to seventeen numbered facts, including the content calendar and personas. A privacy control rejects any identifier.</li>
-            <li><b>Draft.</b> <code>gpt-oss-120b</code> on Groq drafts the memorandum and must cite a fact in every sentence.</li>
-            <li><b>Verify numbers.</b> Code confirms each citation exists and each figure appears in the cited fact.</li>
-            <li><b>Review meaning.</b> An independent model, <code>qwen3.8-27b</code>, judges whether each sentence is faithful to its facts.</li>
-            <li><b>Repair.</b> Flagged statements are returned to the drafting model once, with the reasons.</li>
-            <li><b>Decide.</b> The retention team chooses whom to contact. Nothing is sent to subscribers automatically.</li>
-          </ol>
-        </div>
-        <div class="card">
-          <h2>Known limitations</h2>
-          <ol class="flow">
-            <li>One of the three Phase 1 model targets was missed: top-decile precision is 32.8% against 40%. Even a perfect model reaches only 38.2% on this data, so the target was set too high. AUC (0.772) and calibration were met.</li>
-            <li>The data is synthetic, including the content calendar. The effects of each signal were assumed, not measured; the model must be re-validated on real data inside the company before any use.</li>
-            <li>Reasons are associations, not causes. The model also credited negative tickets rather than ticket counts (collinearity), so one true rule was not recovered.</li>
-            <li>The semantic reviewer is itself a language model and can err; headlines are not verified. Groq processes requests outside Pakistan, acceptable only because aggregated facts are sent.</li>
-            <li>Future work: survival analysis (when a subscriber will leave) and uplift modelling (who an offer actually changes), which needs a real past campaign to learn from.</li>
-          </ol>
-        </div>
-      </div>
-    </section>
+  <main id="app" class="wrap" tabindex="-1">
+    <p class="loading">Loading this week's report&hellip;</p>
   </main>
-  <footer class="wrap foot">Sadan Khan &middot; KSBL DATA722 Generative AI &amp; Strategic Forecasting, Phase 2 &middot; All subscriber records in this report are synthetic.</footer>
-  <script src="app.js"></script>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <p><b>Churn Radar</b> &middot; a retention briefing prototype by Sadan Khan for KSBL DATA722 (Generative AI &amp; Strategic Forecasting).</p>
+      <p>All 100,000 customer records are synthetic. The model recommends; people decide. Nothing is sent to customers automatically.</p>
+    </div>
+  </footer>
+
+  <script src="app.js?v=4" defer></script>
 </body>
 </html>
