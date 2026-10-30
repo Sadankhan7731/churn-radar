@@ -222,6 +222,97 @@
    "people": 124
   }
  ],
+ "risk_bands": [
+  {
+   "band": "Very high",
+   "from": 0.5,
+   "to": 1.0,
+   "customers": 787,
+   "expected_leavers": 471,
+   "revenue_at_risk_pkr": 148815
+  },
+  {
+   "band": "High",
+   "from": 0.3,
+   "to": 0.5,
+   "customers": 3730,
+   "expected_leavers": 1391,
+   "revenue_at_risk_pkr": 440221
+  },
+  {
+   "band": "Elevated",
+   "from": 0.15,
+   "to": 0.3,
+   "customers": 13318,
+   "expected_leavers": 2744,
+   "revenue_at_risk_pkr": 851710
+  },
+  {
+   "band": "Watch",
+   "from": 0.0,
+   "to": 0.15,
+   "customers": 82165,
+   "expected_leavers": 4470,
+   "revenue_at_risk_pkr": 1323515
+  }
+ ],
+ "score_histogram": [
+  {
+   "from": 0.0,
+   "to": 0.05,
+   "customers": 44802
+  },
+  {
+   "from": 0.05,
+   "to": 0.1,
+   "customers": 25128
+  },
+  {
+   "from": 0.1,
+   "to": 0.15,
+   "customers": 12235
+  },
+  {
+   "from": 0.15,
+   "to": 0.2,
+   "customers": 6908
+  },
+  {
+   "from": 0.2,
+   "to": 0.25,
+   "customers": 4006
+  },
+  {
+   "from": 0.25,
+   "to": 0.3,
+   "customers": 2404
+  },
+  {
+   "from": 0.3,
+   "to": 0.35,
+   "customers": 1542
+  },
+  {
+   "from": 0.35,
+   "to": 0.4,
+   "customers": 1066
+  },
+  {
+   "from": 0.4,
+   "to": 0.45,
+   "customers": 708
+  },
+  {
+   "from": 0.45,
+   "to": 0.5,
+   "customers": 414
+  },
+  {
+   "from": 0.5,
+   "to": 1.0,
+   "customers": 787
+  }
+ ],
  "personas": [
   {
    "persona": "Payment-troubled",

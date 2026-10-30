@@ -238,6 +238,19 @@ rule_check = [{"feature": f, "true_effect": "raises churn" if d == "+" else "low
                "model_coefficient": round(float(coef[f"num__{f}"]), 3),
                "matches": bool((coef[f"num__{f}"] > 0) == (d == "+"))} for f, d in TRUE_DIRECTION.items()]
 
+# Risk bands (by score) and the score distribution, for the overview page
+BANDS = [("Very high", 0.5, 1.01), ("High", 0.3, 0.5), ("Elevated", 0.15, 0.3), ("Watch", 0.0, 0.15)]
+risk_bands = []
+for name, lo, hi in BANDS:
+    g = df[(df.churn_score >= lo) & (df.churn_score < hi)]
+    risk_bands.append({"band": name, "from": lo, "to": min(hi, 1.0), "customers": int(len(g)),
+                       "expected_leavers": int(round(g.churn_score.sum())),
+                       "revenue_at_risk_pkr": int(g.revenue_at_risk.sum())})
+edges = [i / 20 for i in range(11)] + [1.01]          # 0-5%, 5-10%, ... 45-50%, 50%+
+hist = pd.cut(df.churn_score, edges, right=False).value_counts(sort=False)
+score_histogram = [{"from": round(float(iv.left), 2), "to": round(min(float(iv.right), 1.0), 2), "customers": int(n)}
+                   for iv, n in hist.items()]
+
 kpis = {
     "subscribers": int(len(df)), "expected_churners": int(df.churn_score.sum()),
     "expected_churn_rate": round(float(df.churn_score.mean()), 3),
@@ -249,7 +262,7 @@ kpis = {
 }
 chosen = metrics["chosen_model"]
 out = {"kpis": kpis, "population_avg": population_avg, "reason_summary": reason_summary,
-       "group_summary": group_summary, "theme_summary": theme_summary, "personas": personas, "content": content, "segments": segments,
+       "group_summary": group_summary, "theme_summary": theme_summary, "risk_bands": risk_bands, "score_histogram": score_histogram, "personas": personas, "content": content, "segments": segments,
        "deciles": deciles, "watchlist": watchlist, "rule_check": rule_check,
        "model": {"name": chosen, **metrics["results"][chosen],
                  "comparison": {n: {k: r[k] for k in ["auc", "precision_top10", "recall_top10", "lift_top10", "brier"]}
