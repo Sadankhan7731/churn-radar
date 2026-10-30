@@ -553,19 +553,22 @@ function pData() {
   <div class="privacy"><svg viewBox="0 0 20 20"><path d="M10 2.5 4 5v4.5c0 3.8 2.6 6.9 6 8 3.4-1.1 6-4.2 6-8V5z"/><path d="m7.5 10 1.8 1.8 3.4-3.6"/></svg>
     <div><b>Your data stays on your device.</b> Files are read and scored in this browser tab and are never uploaded to our servers. The AI assistant and briefing receive only aggregate figures — totals, shares and segment averages — never names, phone numbers or customer IDs. Data is cleared when you close the tab.</div></div>
   <div class="grid c3">
+    <div class="conn live-conn"><div class="conn-h"><span class="conn-logo" style="background:#a91d22">SQL</span><b>Live database<small>SQL Server via Churn Radar Connector</small></b>${LIVE.health ? '<span class="pill ok" style="margin-left:auto">Connected</span>' : ""}</div>
+      <p>Keep scores in sync with your warehouse. The connector runs inside your network; only this browser reads from it.</p><div id="liveBox"></div></div>
     ${conn("CSV", "#16a34a", "Upload a file", "CSV or Excel (.xlsx)", `<label class="drop" id="drop" tabindex="0"><input type="file" id="fileIn" accept=".csv,.xlsx,.xls,text/csv" hidden><b>Drop a file here</b> or click to browse<br><span class="muted" style="font-size:12px">One row per customer · up to ${NUM(MAX_ROWS)} rows</span></label>`)}
     ${conn("GS", "#0f9d58", "Google Sheets or CSV link", "Live link, refreshed on each load", `<p>Publish the sheet to the web as CSV, or paste any public CSV link.</p>
       <form class="row" id="urlForm"><input class="input" id="urlIn" type="url" placeholder="https://docs.google.com/spreadsheets/…" style="flex:1;min-width:0" required><button class="btn" type="submit">Connect</button></form>`)}
     ${conn("LP", "#F0562A", "Sample data", "2,000 Lumen Play customers", `<p>Try the full flow with a sample export, or start from the template.</p>
       <div class="row"><button class="btn" id="sampleBtn" type="button">Load sample</button><a class="btn btn-secondary" href="samples/template.csv" download>Template</a></div>`)}
-    ${conn("SQL", "#a91d22", "Microsoft SQL Server", "Export, then upload", `<p>Run our query against your warehouse, save the result as CSV and upload it here. Rename tables to match your schema.</p>
+    ${conn("SQL", "#6b7280", "SQL Server export", "One-off, no connector", `<p>Prefer not to run a connector? Run our query, save the result as CSV and upload it.</p>
       <div class="row"><a class="btn btn-secondary" href="samples/sqlserver_query.sql" download>Download SQL query</a></div>`)}
     ${conn("XL", "#107c41", "Microsoft Excel", "Workbooks and exports", `<p>Upload .xlsx directly; the first sheet is used. Column names don't need to match exactly.</p><div class="row"><button class="btn btn-secondary" type="button" onclick="document.getElementById('fileIn').click()">Choose workbook</button></div>`)}
-    <div class="conn muted-conn"><div class="conn-h"><span class="conn-logo" style="background:#71717a">DB</span><b>Direct database connectors<small>Enterprise</small></b></div>
-      <p>Live, scheduled connections to SQL Server, PostgreSQL, Snowflake and BigQuery run inside your own network, so credentials and customer rows never pass through a public website.</p>
+    <div class="conn muted-conn"><div class="conn-h"><span class="conn-logo" style="background:#71717a">DB</span><b>More databases<small>Enterprise</small></b></div>
+      <p>Connector adapters for PostgreSQL, Snowflake and BigQuery, scheduled syncs without a browser open, and alerts when risk jumps. Like the SQL Server connector, they run inside your network.</p>
       <div class="row"><span class="pill neutral plain">On the roadmap</span></div></div>
   </div>
-  <section class="panel mt" id="mapStep" ${staged ? "" : "hidden"}></section>`;
+  <section class="panel mt" id="mapStep" ${staged ? "" : "hidden"}></section>
+  <section class="panel mt" id="fmtGuide">${formatGuide()}</section>`;
 }
 function drawMapping() {
   const el = $("#mapStep"); if (!el || !staged) return;
@@ -616,14 +619,132 @@ function aData() {
   drop.addEventListener("drop", e => e.dataTransfer.files[0] && ingest("file", e.dataTransfer.files[0]));
   $("#urlForm").onsubmit = e => { e.preventDefault(); ingest("url", $("#urlIn").value.trim()); };
   $("#sampleBtn").onclick = () => ingest("sample");
+  drawLive();
+  const bindFmt = () => $$("[data-fmt]").forEach(b => b.onclick = () => { fmtTab = b.dataset.fmt; $("#fmtGuide").innerHTML = formatGuide(); bindFmt(); });
+  bindFmt();
   if (staged) drawMapping();
+}
+
+// ---- live database (Churn Radar Connector running inside the company network)
+const LIVE = { url: store.get("liveUrl", "http://localhost:8765"), interval: store.get("liveEvery", 30), health: null, timer: null, syncing: false, last: 0, error: "" };
+async function liveFetch(path, ms = 20000) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
+  try { const r = await fetch(LIVE.url.replace(/\/$/, "") + path, { signal: ctl.signal, cache: "no-store" }); if (!r.ok) throw new Error(`agent returned ${r.status}`); return r; }
+  catch (e) { throw new Error(e.name === "AbortError" ? "the agent didn't answer in time" : /Failed to fetch|NetworkError|Load failed/i.test(e.message) ? "no Churn Radar Connector is running at this address" : e.message); }
+  finally { clearTimeout(t); }
+}
+async function liveConnect() {
+  LIVE.error = ""; drawLive("Connecting…");
+  try { LIVE.health = await (await liveFetch("/health")).json(); store.set("liveUrl", LIVE.url); await liveSync(true); setAutoSync(LIVE.interval); }
+  catch (e) { LIVE.health = null; LIVE.error = e.message; drawLive(); }
+}
+async function liveSync(first = false) {
+  if (LIVE.syncing) return; LIVE.syncing = true; drawLive();
+  try {
+    if (!MODEL) MODEL = await (await fetch("model/churn_model.json")).json();
+    LIVE.health = await (await liveFetch("/health")).json();
+    const raw = await parseCSVText(await (await liveFetch("/signals.csv", 60000)).text());
+    const map = Engine.autoMap(Object.keys(raw[0] || {}));
+    const rows = Engine.score(Engine.normalise(raw, map, MODEL), MODEL);
+    const prev = DATASETS.live;
+    const next = Engine.build(rows, { model: DEMO.model, rule_check: DEMO.rule_check },
+      { name: "Lumen Play live", source: LIVE.health.database.startsWith("SQL Server") ? "SQL Server" : "Live database", map, matched: Engine.FIELDS.filter(([k]) => map[k]).length });
+    Object.defineProperty(next, "_rows", { value: rows, enumerable: false });
+    next.dataset.live = true; next.dataset.platform_time = LIVE.health.platform_time;
+    DATASETS.live = next; NOTES.live = null; CHATS.live ||= []; LIVE.last = Date.now(); LIVE.error = "";
+    refreshDatasetPicker();
+    if (CUR === "live") { simFor = null; D = next; $("#navCount").textContent = D.watchlist.length; }
+    if (first || !prev) { setDataset("live"); toast(`Connected: ${NUM(next.kpis.subscribers)} live customers scored`); }
+    else {
+      const d = next.kpis.expected_churners - prev.kpis.expected_churners, h = LIVE.health;
+      toast(`Synced · ${h.new_since_last ? "+" + h.new_since_last + " new" : "no new"} customers · ${h.gone_since_last} cancelled · expected cancellations ${d >= 0 ? "+" : ""}${d}`);
+      const r = (location.hash.replace(/^#\/?/, "").split("/")[0]) || "";
+      if (CUR === "live" && ["", "segments", "reports", "data", "model"].includes(r) && $("#chat").hidden) route();
+    }
+  } catch (e) { LIVE.error = e.message; }
+  LIVE.syncing = false; drawLive();
+}
+function setAutoSync(sec) {
+  LIVE.interval = sec; store.set("liveEvery", sec); clearInterval(LIVE.timer); LIVE.timer = null;
+  if (sec) LIVE.timer = setInterval(() => LIVE.health && liveSync(), sec * 1000);
+  drawLive();
+}
+function drawLive(msg) {
+  const el = $("#liveBox"); if (!el) return;
+  const h = LIVE.health;
+  el.innerHTML = `
+    <form class="row" id="liveForm"><input class="input" id="liveUrl" value="${esc(LIVE.url)}" aria-label="Connector address" style="flex:1;min-width:0"><button class="btn" type="submit">${h ? "Reconnect" : "Connect"}</button></form>
+    ${msg ? `<p class="muted">${msg}</p>` : LIVE.error ? `<p style="color:var(--red);font-size:12.5px">Couldn't connect: ${esc(LIVE.error)}. Start the connector next to your database (see “Database tables” below).</p>` : ""}
+    ${h ? `<div class="live-status"><span class="live-dot"></span><div><b>${esc(h.database)}</b><div class="muted" style="font-size:12px">${NUM(h.active_customers)} active customers · platform time ${esc(h.platform_time.slice(0, 16))} · ${NUM(h.sessions_last_hour)} sessions in the last hour</div></div></div>
+      <div class="row" style="align-items:center"><button class="btn btn-secondary" id="syncNow" type="button" ${LIVE.syncing ? "disabled" : ""}>${LIVE.syncing ? "Syncing…" : "Sync now"}</button>
+        <label class="muted" style="font-size:12.5px">Auto-sync <select class="sel" id="autoSync">${[[0, "Off"], [30, "Every 30 s"], [60, "Every minute"], [300, "Every 5 min"]].map(([v, l]) => `<option value="${v}" ${LIVE.interval === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>` : ""}`;
+  $("#liveForm").onsubmit = e => { e.preventDefault(); LIVE.url = $("#liveUrl").value.trim(); liveConnect(); };
+  if (h) { $("#syncNow").onclick = () => liveSync(); $("#autoSync").onchange = e => setAutoSync(+e.target.value); }
+}
+setInterval(() => {                                   // "Live · synced 12s ago" in the top bar
+  if (CUR !== "live" || !LIVE.last) return;
+  const s = Math.round((Date.now() - LIVE.last) / 1000);
+  $("#fresh").innerHTML = `<span class="live-dot"></span>Live · synced ${s < 60 ? s + "s" : Math.round(s / 60) + " min"} ago`;
+}, 1000);
+
+// ---- data format guide
+const FORMAT = {
+  subscriber_id: ["Text", "SUB000123", "Required. Any unique, pseudonymous ID — never a phone number or name."],
+  plan: ["Text", "Monthly", "Your plan names; Daily, Weekly, Monthly and Sports Premium are recognised by the model."],
+  payment_channel: ["Text", "Operator 1", "Carrier, wallet or card."], monthly_revenue_pkr: ["Number (PKR)", "250", "Revenue per customer per month."],
+  city: ["Text", "Karachi", ""], device: ["Text", "Android", "Android, iOS, Smart TV, Web."], network: ["Text", "4G", "3G, 4G or WiFi."],
+  signup_source: ["Text", "Social ad", ""], favourite_genre: ["Text", "Sports", ""], tenure_days: ["Whole number", "240", "Days since sign-up."],
+  watch_min_last_7d: ["Number (minutes)", "310", ""], watch_min_prev_7d: ["Number (minutes)", "295", "The 7 days before that."],
+  watch_trend_8w_pct: ["Number (%)", "-12", "Change per month over 8 weeks; negative = declining."], sessions_7d: ["Whole number", "6", ""],
+  days_since_active: ["Whole number", "2", ""], completion_rate: ["0–1 or %", "0.62", "Share of started episodes finished."],
+  distinct_titles_30d: ["Whole number", "8", ""], category_concentration: ["0–1 or %", "0.70", "Share of viewing in their top genre."],
+  live_share: ["0–1 or %", "0.30", "Share of viewing that is live."], binge_sessions_30d: ["Whole number", "1", "Sessions of 2+ hours."],
+  fav_content_ended: ["0/1 or yes/no", "1", "The title they followed has ended."], days_to_next_release: ["Whole number", "12", "Until the next release in their genre."],
+  catalogue_match_titles: ["Whole number", "35", "Titles matching their taste."], recs_ignored_30d: ["Whole number", "4", ""],
+  failed_renewals_30d: ["Whole number", "1", ""], low_balance_renewals_30d: ["Whole number", "0", "Carrier billing only."], recharges_30d: ["Whole number", "3", ""],
+  payment_switches_90d: ["Whole number", "0", ""], buffering_errors_7d: ["Whole number", "1", ""], app_crashes_7d: ["Whole number", "0", ""],
+  video_start_sec: ["Number (seconds)", "2.1", "Average time to first frame."], login_failures_30d: ["Whole number", "0", ""],
+  plan_downgrades_90d: ["Whole number", "0", ""], past_cancellations: ["Whole number", "0", ""], offers_received_90d: ["Whole number", "2", ""],
+  offers_opened_90d: ["Whole number", "1", ""], used_discount: ["0/1 or yes/no", "0", "Joined on a discount."], support_tickets_30d: ["Whole number", "0", ""],
+  ticket_sentiment: ["Text", "negative", "negative, neutral, positive or none."], ticket_resolved: ["0/1 or yes/no", "1", ""],
+};
+const RECOMMENDED = ["subscriber_id", "plan", "payment_channel", "monthly_revenue_pkr", "tenure_days", "watch_min_last_7d", "watch_min_prev_7d",
+  "days_since_active", "failed_renewals_30d", "support_tickets_30d", "ticket_sentiment", "fav_content_ended"];
+const RAW_TABLES = [
+  ["customers", "customer_id, signup_date, plan, monthly_price_pkr, payment_channel, city, device, network, signup_source, favourite_genre, joined_on_discount, past_cancellations, status"],
+  ["viewing_sessions", "customer_id, started_at, minutes, genre, is_live, completed, start_time_sec, buffering_events"],
+  ["billing_events", "customer_id, ts, event (renewal_success, renewal_failed, low_balance, recharge, method_switch), amount_pkr"],
+  ["app_events", "customer_id, ts, event (crash, login_failure)"],
+  ["support_tickets", "customer_id, opened_at, sentiment, resolved"],
+  ["marketing_offers", "customer_id, sent_at, opened"], ["recommendations", "customer_id, shown_at, clicked"],
+  ["plan_changes", "customer_id, ts, kind (upgrade, downgrade)"], ["content_releases", "genre, ended_title, ended_at, next_title, next_release_at"],
+];
+let fmtTab = "file";
+function formatGuide() {
+  return `<div class="panel-h"><div><h2>Data format</h2><div class="sub">What Churn Radar expects from a file or a live database</div></div>
+      <div class="seg" role="group"><button type="button" data-fmt="file" aria-pressed="${fmtTab === "file"}">File columns</button><button type="button" data-fmt="db" aria-pressed="${fmtTab === "db"}">Database tables</button></div></div>
+    <div class="panel-b">${fmtTab === "file" ? `
+      <ul class="rules"><li><b>One row per active customer</b>, as of today. Column names don't need to match exactly; you can map them after upload.</li>
+        <li>Only <b>${"subscriber_id"}</b> is required. The ${RECOMMENDED.length} <b>recommended</b> columns give most of the accuracy; anything missing is filled with typical values and never used as a reason.</li>
+        <li>Rates can be 0–1 or percentages; flags can be 0/1, yes/no or true/false. No names or phone numbers, please.</li></ul>
+      <div class="row" style="margin:10px 0 14px"><a class="btn btn-secondary" href="samples/template.csv" download>Download template</a><a class="btn btn-ghost" href="samples/lumen_play_sample.csv" download>Download a filled example</a></div>
+      <div class="tbl-wrap"><table class="fmt"><thead><tr><th>Column</th><th>Group</th><th>Type</th><th>Example</th><th>Notes</th></tr></thead><tbody>${
+        Engine.FIELDS.map(([k, label, g]) => `<tr><td><code>${k}</code>${k === "subscriber_id" ? ' <span class="pill no plain">Required</span>' : RECOMMENDED.includes(k) ? ' <span class="pill blue plain">Recommended</span>' : ""}<div class="muted" style="font-size:12px">${label}</div></td>
+          <td>${g}</td><td>${FORMAT[k][0]}</td><td><code>${FORMAT[k][1]}</code></td><td class="muted" style="min-width:200px">${FORMAT[k][2]}</td></tr>`).join("")}</tbody></table></div>`
+    : `<ul class="rules"><li>The <b>Churn Radar Connector</b> runs on a server inside your network, next to SQL Server. It reads these raw tables, builds the signals and serves them only to browsers on your network.</li>
+        <li>Connect it with an ODBC connection string (<code>CONNECTOR_DSN</code>) and a read-only account. Credentials stay on that server; customer rows never reach our cloud.</li>
+        <li>Table and column names can differ — adjust the queries in <code>connector/agent.py</code>, or expose views with these names.</li></ul>
+      <div class="tbl-wrap"><table class="fmt"><thead><tr><th>Table</th><th>Columns read</th></tr></thead><tbody>${RAW_TABLES.map(([t, c]) => `<tr><td><code>${t}</code></td><td class="muted">${c}</td></tr>`).join("")}</tbody></table></div>
+      <div class="code-block"><div class="muted" style="font-size:12px;margin-bottom:6px">Run the connector (demo database included)</div><pre>python connector/create_demo_db.py      # once: demo OTT database
+python connector/simulate_platform.py   # keeps writing live events
+python connector/agent.py               # serves http://localhost:8765</pre></div>`}</div>`;
 }
 
 // ---- datasets
 const DATASETS = {};
 function refreshDatasetPicker() {
   const sel = $("#datasetSel");
-  sel.innerHTML = `<option value="demo">Lumen Play (sample)</option>` + (DATASETS.mine ? `<option value="mine">${esc(DATASETS.mine.dataset.name)} · ${NUM(DATASETS.mine.kpis.subscribers)}</option>` : "") + `<option value="__add">+ Add data source…</option>`;
+  sel.innerHTML = `<option value="demo">Lumen Play (sample)</option>` + (DATASETS.live ? `<option value="live">● Lumen Play live · ${NUM(DATASETS.live.kpis.subscribers)}</option>` : "") + (DATASETS.mine ? `<option value="mine">${esc(DATASETS.mine.dataset.name)} · ${NUM(DATASETS.mine.kpis.subscribers)}</option>` : "") + `<option value="__add">+ Add data source…</option>`;
   sel.value = CUR;
 }
 function setDataset(key, reroute = true) {
@@ -631,7 +752,7 @@ function setDataset(key, reroute = true) {
   NOTE = NOTES[key] ? NOTES[key].note : null; FACTS = NOTES[key] ? NOTES[key].facts : [];
   cf = { q: "", band: "", group: "", plan: "", status: "", page: 0 };
   $("#navCount").textContent = D.watchlist.length;
-  $("#fresh").textContent = D.dataset && D.dataset.own ? `${D.dataset.source} · scored just now` : `Scored ${today}`;
+  $("#fresh").textContent = key === "live" ? "Live · synced just now" : D.dataset && D.dataset.own ? `${D.dataset.source} · scored just now` : `Scored ${today}`;
   $("#datasetSel").value = key;
   renderChat();
   if (reroute) route();
