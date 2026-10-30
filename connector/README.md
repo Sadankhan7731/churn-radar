@@ -16,7 +16,7 @@ OTT platform ──writes events──► SQL Server (or the demo SQLite file)
 ## Try the demo (three terminals)
 
 ```bash
-.venv/bin/python connector/create_demo_db.py      # once: 10,000 customers, 8 weeks of history
+.venv/bin/python connector/create_demo_db.py      # once: 10,000 customers, 12 weeks of history
 .venv/bin/python connector/simulate_platform.py   # keeps writing live events (Ctrl+C to stop)
 .venv/bin/python connector/agent.py               # serves http://localhost:8765
 ```
@@ -24,6 +24,24 @@ OTT platform ──writes events──► SQL Server (or the demo SQLite file)
 Then open Churn Radar → **Data sources** → **Live database** → **Connect**. Choose an auto-sync interval; the top bar shows *Live · synced Xs ago*, and each sync reports new customers, cancellations and the change in expected cancellations.
 
 The simulator moves the platform clock 30 minutes every 2 seconds (`--tick` and `--step` change this), so a demo day passes in about 1.5 minutes: customers watch, renewals fail, tickets are raised, people sign up and cancel, and some customers start drifting away.
+
+## The learning loop: the model adapts as behaviour changes
+
+Customer behaviour drifts, so a model trained once slowly goes stale. The agent keeps it current (`learn.py`):
+
+1. **Outcomes** – it rebuilds every signal *as it was 30 days ago* and checks who actually cancelled since. Those are fresh, real labels.
+2. **Monitor** – realised accuracy of the live model on those customers (AUC, hit rate, predicted vs actual churn), and drift per signal (PSI: under 0.10 stable, 0.10–0.25 moderate, over 0.25 major).
+3. **Retrain** – a challenger is trained on the latest outcomes (automatically every N platform days, or with *Retrain now*).
+4. **Compare** – challenger vs live model on the same held-out recent customers. It is offered only if its AUC is at least 0.01 better.
+5. **Promote** – a person approves the switch on **Model health** (or turn on auto-promote). The browser then scores live customers with the promoted model; every version is kept in the history.
+
+Demo a market shift (poor streaming quality suddenly drives far more cancellations):
+
+```bash
+.venv/bin/python connector/simulate_platform.py --tick 1 --step 60 --shift-after 1
+```
+
+Watch **Model health**: drift on buffering rises, predicted vs actual churn moves apart, and the next retrain offers a challenger that has learned the new pattern.
 
 ## Connect a real SQL Server
 
@@ -52,5 +70,10 @@ Use a read-only account. The agent reads these tables (rename them in `agent.py`
 
 * `GET /health` – status, database type, active customers, platform time, activity since last sync
 * `GET /signals.csv` – one row per active customer with the 40 signals (cached for 5 seconds)
+* `GET /model` – the live (promoted) model in the browser's JSON format
+* `GET /model/status` – live version, realised accuracy, drift, challenger comparison, settings, version history
+* `POST /model/retrain`, `POST /model/promote`, `POST /model/settings` (`auto_retrain_days`, `auto_promote`)
+
+Model files and the registry are kept in `connector/models/` (not committed).
 
 The agent binds to `127.0.0.1` only. To serve other machines on your network, change the bind address and put it behind your usual internal TLS and access controls.

@@ -449,6 +449,12 @@ function aCampaigns() {
 function pModel() {
   const m = D.model, c = m.ceiling, t = DEMO_NOTE.trap_test, v = DEMO_NOTE.verification;
   const target = (name, val, goal, ok, note) => `<tr><td>${name}</td><td class="r">${val}</td><td class="r muted">${goal}</td><td>${ok ? '<span class="pill ok">Met</span>' : '<span class="pill no">Not met</span>'}</td><td class="muted" style="min-width:220px">${note}</td></tr>`;
+  const live = CUR === "live" && LIVE.health;
+  if (live) return `<div class="ph"><div><h1>Model health</h1><div class="status-line" style="margin-top:6px"><span class="dot"></span>Scoring live customers with ${esc(D.dataset.model || "the bundled model")}</div></div></div>` + mlopsPanel()
+    + pModelBody(m, c, t, v, target).replace(/<div class="ph">[\s\S]*?<\/div><\/div>\s*/, `<h2 style="font-size:15px;margin:26px 0 10px">Original evaluation · offline test set of 30,000 customers</h2>`);
+  return pModelBody(m, c, t, v, target);
+}
+function pModelBody(m, c, t, v, target) {
   return `<div class="ph"><div><h1>Model health</h1><div class="status-line" style="margin-top:6px"><span class="dot"></span>Churn model v2 · logistic regression · ${D.kpis.signals} signals · trained on 70,000 customers, tested on 30,000 held out</div>${D.dataset && D.dataset.own ? `<p style="margin-top:8px">Accuracy below was measured on the held-out Lumen Play test set. Your own data has no known outcomes yet, so its accuracy can only be measured after 30 days.</p>` : ""}</div></div>
   <div class="grid c4">
     ${kpi("Hit rate, top 10%", PCT(m.precision_top10, 1), "flagged customers who actually leave", "", "Precision in the top decile.")}
@@ -479,6 +485,7 @@ function pModel() {
     .map(([a, b], i) => `<li><span class="n">${i + 1}</span><div><b>${a}</b><p>${b}</p></div></li>`).join("")}</ul>`, { flush: true })}</div>`;
 }
 function aModel() {
+  if (CUR === "live" && LIVE.health) loadMlops();
   const cal = D.model.calibration, lim = Math.max(...cal.map(c => Math.max(c.predicted, c.actual))) * 110;
   chart("calChart", { type: "scatter", data: { datasets: [
     { label: "Model", data: cal.map(c => ({ x: c.predicted * 100, y: c.actual * 100 })), backgroundColor: cssv("--chart-2"), borderColor: cssv("--chart-2"), showLine: true, borderWidth: 2, pointRadius: 3 },
@@ -643,14 +650,16 @@ async function liveSync(first = false) {
   try {
     if (!MODEL) MODEL = await (await fetch("model/churn_model.json")).json();
     LIVE.health = await (await liveFetch("/health")).json();
+    try { LIVE.model = await (await liveFetch("/model", 30000)).json(); } catch (e) { LIVE.model = null; }   // the promoted model, if the agent has one
+    const liveModel = LIVE.model || MODEL;
     const raw = await parseCSVText(await (await liveFetch("/signals.csv", 60000)).text());
     const map = Engine.autoMap(Object.keys(raw[0] || {}));
-    const rows = Engine.score(Engine.normalise(raw, map, MODEL), MODEL);
+    const rows = Engine.score(Engine.normalise(raw, map, liveModel), liveModel);
     const prev = DATASETS.live;
     const next = Engine.build(rows, { model: DEMO.model, rule_check: DEMO.rule_check },
       { name: "Lumen Play live", source: LIVE.health.database.startsWith("SQL Server") ? "SQL Server" : "Live database", map, matched: Engine.FIELDS.filter(([k]) => map[k]).length });
     Object.defineProperty(next, "_rows", { value: rows, enumerable: false });
-    next.dataset.live = true; next.dataset.platform_time = LIVE.health.platform_time;
+    next.dataset.live = true; next.dataset.platform_time = LIVE.health.platform_time; next.dataset.model = liveModel.name;
     DATASETS.live = next; NOTES.live = null; CHATS.live ||= []; LIVE.last = Date.now(); LIVE.error = "";
     refreshDatasetPicker();
     if (CUR === "live") { simFor = null; D = next; $("#navCount").textContent = D.watchlist.length; }
@@ -676,7 +685,7 @@ function drawLive(msg) {
     <form class="row" id="liveForm"><input class="input" id="liveUrl" value="${esc(LIVE.url)}" aria-label="Connector address" style="flex:1;min-width:0"><button class="btn" type="submit">${h ? "Reconnect" : "Connect"}</button></form>
     ${msg ? `<p class="muted">${msg}</p>` : LIVE.error ? `<p style="color:var(--red);font-size:12.5px">Couldn't connect: ${esc(LIVE.error)}. Start the connector next to your database (see “Database tables” below).${
       location.protocol === "https:" && /localhost|127\.0\.0\.1/.test(LIVE.url) ? " If your browser asks to allow access to devices on your local network, choose Allow; some browsers block this for public sites, in which case open Churn Radar from your own network instead." : ""}</p>` : ""}
-    ${h ? `<div class="live-status"><span class="live-dot"></span><div><b>${esc(h.database)}</b><div class="muted" style="font-size:12px">${NUM(h.active_customers)} active customers · platform time ${esc(h.platform_time.slice(0, 16))} · ${NUM(h.sessions_last_hour)} sessions in the last hour</div></div></div>
+    ${h ? `<div class="live-status"><span class="live-dot"></span><div><b>${esc(h.database)}</b><div class="muted" style="font-size:12px">${LIVE.model ? esc(LIVE.model.name) + " · " : ""}${NUM(h.active_customers)} active customers · platform time ${esc(h.platform_time.slice(0, 16))} · ${NUM(h.sessions_last_hour)} sessions in the last hour</div></div></div>
       <div class="row" style="align-items:center"><button class="btn btn-secondary" id="syncNow" type="button" ${LIVE.syncing ? "disabled" : ""}>${LIVE.syncing ? "Syncing…" : "Sync now"}</button>
         <label class="muted" style="font-size:12.5px">Auto-sync <select class="sel" id="autoSync">${[[0, "Off"], [30, "Every 30 s"], [60, "Every minute"], [300, "Every 5 min"]].map(([v, l]) => `<option value="${v}" ${LIVE.interval === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>` : ""}`;
   $("#liveForm").onsubmit = e => { e.preventDefault(); LIVE.url = $("#liveUrl").value.trim(); liveConnect(); };
@@ -739,6 +748,68 @@ function formatGuide() {
       <div class="code-block"><div class="muted" style="font-size:12px;margin-bottom:6px">Run the connector (demo database included)</div><pre>python connector/create_demo_db.py      # once: demo OTT database
 python connector/simulate_platform.py   # keeps writing live events
 python connector/agent.py               # serves http://localhost:8765</pre></div>`}</div>`;
+}
+
+// ---- live learning loop (Model health, when the live database is connected)
+let MLOPS = null;
+async function agentPost(path, body) {
+  const r = await fetch(LIVE.url.replace(/\/$/, "") + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const j = await r.json(); if (!r.ok || j.status === "error") throw new Error(j.error || r.statusText); return j;
+}
+function mlopsPanel() {
+  return `<section class="panel" id="mlops" style="margin-bottom:16px"><div class="panel-h"><div><h2>Live learning loop</h2>
+    <div class="sub">The model is checked against real outcomes, monitored for drift, and retrained as behaviour changes — inside your network</div></div>
+    <div class="ph-actions"><button class="btn btn-secondary" id="mlRetrain" type="button">Retrain now</button></div></div><div class="panel-b" id="mlBody"><p class="muted">Loading the learning loop…</p></div></section>`;
+}
+const mlPct = x => (x == null ? "—" : PCT(x, 1));
+function drawMlops() {
+  const el = $("#mlBody"); if (!el || !MLOPS) return;
+  const m = MLOPS, lv = m.live_version, rz = m.realized || {}, c = m.candidate;
+  const days = (a, b) => Math.round((new Date(a.replace(" ", "T")) - new Date(b.replace(" ", "T"))) / 864e5);
+  const inSample = lv.trained_at && days(m.platform_time, lv.trained_at) < m.horizon_days;
+  const worst = m.drift[0] || { status: "stable" };
+  const row = (l, a, b) => `<tr><td>${l}</td><td class="r">${a}</td>${b !== undefined ? `<td class="r">${b}</td>` : ""}</tr>`;
+  el.innerHTML = `
+    <div class="grid c4">
+      ${kpi("Live model", "v" + lv.version, lv.label + (lv.promoted_by ? ` · ${lv.promoted_by}` : ""))}
+      ${kpi("Accuracy on real outcomes", rz.auc == null ? "—" : rz.auc.toFixed(3), inSample ? `AUC · measured on the data it learned from; fresh check after ${m.horizon_days} days` : `AUC on ${NUM(rz.n || 0)} customers scored ${m.horizon_days} days ago`, rz.auc >= .7 ? "green" : "red")}
+      ${kpi("Predicted vs actual churn", `${mlPct(rz.predicted_rate)} → ${mlPct(rz.actual_rate)}`, Math.abs((rz.predicted_rate || 0) - (rz.actual_rate || 0)) <= .02 ? "well calibrated" : "off: the model needs updating", Math.abs((rz.predicted_rate || 0) - (rz.actual_rate || 0)) <= .02 ? "green" : "red")}
+      ${kpi("Behaviour drift", worst.status === "stable" ? "Stable" : worst.status === "moderate" ? "Moderate" : "Major", `largest: ${esc(worst.label || "—")} (PSI ${(worst.psi || 0).toFixed(2)}) since ${esc((m.reference_at || "").slice(0, 10))}`, worst.status === "stable" ? "green" : "red")}
+    </div>
+    ${c ? `<div class="candidate ${c.better ? "good" : ""}"><div class="cand-h"><div><b>Challenger v${c.version}</b> <span class="muted">trained ${esc(c.trained_at.slice(0, 16))} on ${NUM(c.train_customers)} customers and ${NUM(c.outcomes)} real cancellations</span></div>
+        ${c.better ? `<button class="btn" id="mlPromote" type="button">Approve and switch to v${c.version}</button>` : `<span class="pill neutral plain">Not clearly better — keeping v${lv.version}</span>`}</div>
+      <div class="grid c2" style="gap:12px;margin-top:10px">
+        <table><thead><tr><th>Held-out recent customers</th><th class="r">Live v${lv.version}</th><th class="r">Challenger v${c.version}</th></tr></thead><tbody>
+          ${row("AUC", c.live.auc.toFixed(3), `<b>${c.challenger.auc.toFixed(3)}</b>`)}${row("Hit rate, top 10%", PCT(c.live.precision_top10, 1), `<b>${PCT(c.challenger.precision_top10, 1)}</b>`)}
+          ${row("Lift vs random", c.live.lift_top10.toFixed(2) + "×", `<b>${c.challenger.lift_top10.toFixed(2)}×</b>`)}${row("Predicted → actual churn", `${PCT(c.live.predicted_rate, 1)} → ${PCT(c.live.actual_rate, 1)}`, `${PCT(c.challenger.predicted_rate, 1)} → ${PCT(c.challenger.actual_rate, 1)}`)}
+        </tbody></table>
+        <table><thead><tr><th>What it learned differently</th><th class="r">Before</th><th class="r">After</th></tr></thead><tbody>
+          ${c.changes.map(x => row(esc(x.label), (x.before > 0 ? "+" : "") + x.before.toFixed(2), `<b>${(x.after > 0 ? "+" : "") + x.after.toFixed(2)}</b>`)).join("")}
+        </tbody></table></div>
+      <p class="muted" style="font-size:12px;margin-top:8px">Weights are per typical difference in the signal; positive raises churn risk. A challenger is offered only if it beats the live model's AUC by at least 0.01 on customers it never saw.</p></div>` : ""}
+    <div class="grid c2 mt" style="align-items:start">
+      <div><h3 style="font-size:12px;color:var(--text-3);margin:0 0 8px">Drift since the live model was activated</h3>
+        <table><thead><tr><th>Signal</th><th class="r">PSI</th><th>Status</th></tr></thead><tbody>${m.drift.map(d => `<tr><td>${esc(d.label)}</td><td class="r">${d.psi.toFixed(3)}</td><td><span class="pill ${d.status === "stable" ? "ok" : d.status === "moderate" ? "el" : "no"}">${d.status}</span></td></tr>`).join("")}</tbody></table>
+        <p class="muted" style="font-size:12px;margin-top:6px">PSI under 0.10 is stable, 0.10–0.25 moderate, over 0.25 a major shift.</p></div>
+      <div><h3 style="font-size:12px;color:var(--text-3);margin:0 0 8px">Automation</h3>
+        <div class="field"><label>Retrain automatically <select class="sel" id="mlEvery" style="margin-left:8px">${[[0, "Off"], [7, "every 7 days"], [14, "every 14 days"], [30, "every 30 days"]].map(([v, l]) => `<option value="${v}" ${m.settings.auto_retrain_days === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+          <div class="hint">Platform days. Last retrain ${m.days_since_retrain} days ago · ${NUM(m.outcomes_available)} recent cancellations available to learn from.</div></div>
+        <label class="toggle"><input type="checkbox" id="mlAuto" ${m.settings.auto_promote ? "checked" : ""}> Promote better models automatically</label>
+        <div class="hint" style="font-size:12px;color:var(--text-3);margin-top:4px">Off by default: a person approves each switch (Phase 1: people decide).</div>
+        <h3 style="font-size:12px;color:var(--text-3);margin:16px 0 8px">Version history</h3>
+        <table><tbody>${[...m.versions].reverse().map(v => `<tr><td><b>v${v.version}</b> <span class="pill ${v.status === "live" ? "ok" : "neutral"} plain">${v.status}</span><div class="muted" style="font-size:12px">${esc(v.label)}</div></td><td class="r muted" style="font-size:12px">${esc((v.activated_at || "").slice(0, 16))}${v.metrics ? `<br>AUC ${v.metrics.auc}` : ""}</td></tr>`).join("")}</tbody></table></div>
+    </div>`;
+  const pr = $("#mlPromote"); if (pr) pr.onclick = async () => { pr.disabled = true; pr.textContent = "Switching…";
+    try { MLOPS = await agentPost("/model/promote"); LIVE.model = null; drawMlops(); toast(`Now scoring live customers with v${MLOPS.live_version.version}`); await liveSync(); } catch (e) { toast("Couldn't switch: " + e.message); pr.disabled = false; } };
+  $("#mlEvery").onchange = async e => { MLOPS = await agentPost("/model/settings", { auto_retrain_days: +e.target.value }); drawMlops(); };
+  $("#mlAuto").onchange = async e => { MLOPS = await agentPost("/model/settings", { auto_promote: e.target.checked }); drawMlops(); toast(e.target.checked ? "Better models will be promoted automatically" : "Each switch now needs approval"); };
+}
+async function loadMlops() {
+  try { MLOPS = await (await liveFetch("/model/status", 60000)).json(); drawMlops(); }
+  catch (e) { const el = $("#mlBody"); if (el) el.innerHTML = `<p class="muted">Couldn't load the learning loop: ${esc(e.message)}</p>`; }
+  const b = $("#mlRetrain"); if (b) b.onclick = async () => { b.disabled = true; b.textContent = "Retraining…";
+    try { MLOPS = await agentPost("/model/retrain"); drawMlops(); toast(MLOPS.candidate && MLOPS.candidate.better ? `Challenger v${MLOPS.candidate.version} is better — review and approve` : "Retrained: not clearly better, keeping the live model"); }
+    catch (e) { toast("Retrain failed: " + e.message); } b.disabled = false; b.textContent = "Retrain now"; };
 }
 
 // ---- datasets
@@ -949,7 +1020,7 @@ let simFor = null, simBusy = false, simLast = null, simKeep = false;
 async function ensureSimBase() {
   if (simFor === CUR && Sim.ready) return;
   if (D.dataset && D.dataset.own && D._rows) {
-    Sim.prepare(MODEL, D._rows, 1);
+    Sim.prepare(CUR === "live" && LIVE.model ? LIVE.model : MODEL, D._rows, 1);
   } else {
     if (!MODEL) MODEL = await (await fetch("model/churn_model.json")).json();
     const text = await (await fetch("samples/simulator_base.csv")).text();

@@ -389,3 +389,8 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 .applied { font-size: 12.5px; font-weight: 600; color: var(--green); margin-bottom: 6px; }
 @keyframes flash { 0% { box-shadow: 0 0 0 2px var(--brand); } 100% { box-shadow: 0 0 0 2px transparent; } }
 .flash { animation: flash 1.6s ease-out; border-radius: var(--r-lg); }
+
+/* ---------- live learning loop ---------- */
+.candidate { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--r-lg); padding: 14px; background: var(--panel-2); }
+.candidate.good { border-color: var(--green); box-shadow: 0 0 0 1px var(--green-soft); }
+.cand-h { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }

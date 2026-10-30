@@ -4,3 +4,4 @@ lumen_play.db
 *.db-wal
 *.db-shm
 .simulator.lock
+models/

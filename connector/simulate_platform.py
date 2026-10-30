@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from create_demo_db import GENRES, PLANS, RENEW_EVERY, fail_chance, make_customers
+from create_demo_db import GENRES, PLANS, RENEW_EVERY, churn_monthly, fail_chance, make_customers
 
 DB = Path(__file__).with_name("lumen_play.db")
 LOCK = Path(__file__).with_name(".simulator.lock")
@@ -47,8 +47,9 @@ FMT = "%Y-%m-%d %H:%M:%S"
 rng = np.random.default_rng()
 
 
-def main(tick, step):
+def main(tick, step, shift_after):
     con = sqlite3.connect(DB, timeout=30)
+    start = datetime.strptime(con.execute("SELECT now FROM platform_clock").fetchone()[0], FMT)
     con.execute("PRAGMA journal_mode=WAL")            # lets the connector read while we write
     print(f"Lumen Play platform simulator: +{step} platform minutes every {tick}s. Ctrl+C to stop.\n")
     n_tick = 0
@@ -57,6 +58,10 @@ def main(tick, step):
         now = datetime.strptime(con.execute("SELECT now FROM platform_clock").fetchone()[0], FMT) + timedelta(minutes=step)
         stamp = lambda: (now - timedelta(minutes=int(rng.integers(0, step)))).strftime(FMT)
         con.execute("UPDATE platform_clock SET now = ?", (now.strftime(FMT),))
+        if shift_after is not None and now >= start + timedelta(days=shift_after):
+            if con.execute("SELECT value FROM platform_settings WHERE name='quality_weight'").fetchone()[0] != "4.0":
+                con.execute("UPDATE platform_settings SET value = '4.0' WHERE name = 'quality_weight'")
+                print("\n*** MARKET SHIFT: a competitor launches a smoother app - poor streaming quality now drives far more cancellations ***\n", flush=True)
         rows = con.execute("""SELECT c.customer_id, c.plan, c.payment_channel, c.network, c.favourite_genre, c.monthly_price_pkr,
                                      t.base_minutes, t.trend, t.fragility, t.quality_issue, t.completion, t.live_pref, t.concentration,
                                      t.open_prob, t.temper, t.next_renewal_at, t.failed_streak
@@ -99,8 +104,11 @@ def main(tick, step):
                 con.execute("UPDATE _sim_traits SET failed_streak=0, next_renewal_at=? WHERE customer_id=?",
                             ((now + timedelta(days=RENEW_EVERY[r[1]])).strftime(FMT), r[0]))
 
-        # --- voluntary cancellations: low engagement, falling trend, fragile and quick-tempered customers leave more
-        hazard = .09 / (30 * 24 * 60 / step) * np.exp(-1.2 * (weekly / 300 - 1) - 2.0 * trend)
+        # --- voluntary cancellations: the platform's true behaviour (shared with the database generator)
+        qw = float(con.execute("SELECT value FROM platform_settings WHERE name = 'quality_weight'").fetchone()[0])
+        frag = np.array([r[8] for r in rows]); qual = np.array([r[9] for r in rows]); temp = np.array([r[14] for r in rows])
+        daily = np.array([r[1] == "Daily" for r in rows])
+        hazard = churn_monthly(base, trend, frag, qual, temp, daily, qw) / (30 * 24 * 60 / step)
         for i in np.nonzero(rng.random(n) < hazard)[0]:
             con.execute("UPDATE customers SET status='cancelled', cancelled_at=? WHERE customer_id=? AND status='active'", (now.strftime(FMT), ids[i]))
             counts["cancelled"] += 1
@@ -148,11 +156,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--tick", type=float, default=2, help="real seconds between writes")
     ap.add_argument("--step", type=int, default=30, help="platform minutes per tick")
+    ap.add_argument("--shift-after", type=float, default=None, metavar="DAYS",
+                    help="platform days until a market shift (poor quality starts driving churn); 0 = right away")
     a = ap.parse_args()
     take_lock()
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt))   # clean up on kill too
     try:
-        main(a.tick, a.step)
+        main(a.tick, a.step, a.shift_after)
     except KeyboardInterrupt:
         print("\nSimulator stopped.")
     finally:

@@ -26,7 +26,9 @@ import time
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
+
+import learn
 
 import numpy as np
 import pandas as pd
@@ -50,11 +52,18 @@ def q(con, sql, params=()):
     return pd.read_sql_query(sql, con, params=list(params))
 
 
-def build_signals(con):
-    """Raw tables -> one row of 40 signals per active customer, as of the platform clock."""
-    now = datetime.strptime(str(q(con, "SELECT now FROM platform_clock").iloc[0, 0])[:19], FMT)
+def platform_now(con):
+    return datetime.strptime(str(q(con, "SELECT now FROM platform_clock").iloc[0, 0])[:19], FMT)
+
+
+def build_signals(con, as_of=None, with_label=False, horizon_days=30):
+    """Raw tables -> one row of 40 signals per customer who was active at `as_of` (default: now).
+    Only events BEFORE as_of are used, so we can rebuild exactly what we knew on a past date.
+    with_label adds `churned` = cancelled within `horizon_days` after as_of (the outcome to learn from)."""
+    now = as_of or platform_now(con)
+    stamp = now.strftime(FMT)
     ago = lambda d: (now - timedelta(days=d)).strftime(FMT)
-    cust = q(con, "SELECT * FROM customers WHERE status = 'active'")
+    cust = q(con, "SELECT * FROM customers WHERE signup_date <= ? AND (cancelled_at IS NULL OR cancelled_at > ?)", (stamp, stamp))
     ids = cust.customer_id
     out = pd.DataFrame({"subscriber_id": ids})
     for c in ["plan", "payment_channel", "city", "device", "network", "signup_source", "favourite_genre", "past_cancellations"]:
@@ -64,7 +73,7 @@ def build_signals(con):
     out["tenure_days"] = (now - pd.to_datetime(cust.signup_date)).dt.days.clip(lower=0).values
 
     # --- viewing (last 8 weeks)
-    s = q(con, "SELECT customer_id, started_at, minutes, genre, is_live, completed, start_time_sec, buffering_events FROM viewing_sessions WHERE started_at >= ?", (ago(56),))
+    s = q(con, "SELECT customer_id, started_at, minutes, genre, is_live, completed, start_time_sec, buffering_events FROM viewing_sessions WHERE started_at >= ? AND started_at < ?", (ago(56), stamp))
     s["age"] = (now - pd.to_datetime(s.started_at)).dt.total_seconds() / 86400
     s["week"] = (s.age // 7).astype(int).clip(0, 7)                       # 0 = this week
     wk = s.pivot_table(index="customer_id", columns="week", values="minutes", aggfunc="sum", fill_value=0).reindex(ids, fill_value=0)
@@ -104,11 +113,11 @@ def build_signals(con):
                                     and (g != "Sports" or live.get(i, 0) >= 0.5)) for i, g in zip(ids, fav)]
     out["days_to_next_release"] = [nxt.get(g, 7) for g in fav]
     out["catalogue_match_titles"] = [18 if g == "Kids" else 35 for g in fav]
-    r = q(con, "SELECT customer_id, clicked FROM recommendations WHERE shown_at >= ?", (ago(30),))
+    r = q(con, "SELECT customer_id, clicked FROM recommendations WHERE shown_at >= ? AND shown_at < ?", (ago(30), stamp))
     out["recs_ignored_30d"] = r[r.clicked == 0].groupby("customer_id").size().reindex(ids, fill_value=0).values
 
     # --- payment
-    b = q(con, "SELECT customer_id, ts, event FROM billing_events WHERE ts >= ?", (ago(90),))
+    b = q(con, "SELECT customer_id, ts, event FROM billing_events WHERE ts >= ? AND ts < ?", (ago(90), stamp))
     b30 = b[b.ts >= ago(30)]
     cnt = lambda d, e: d[d.event == e].groupby("customer_id").size().reindex(ids, fill_value=0).values
     out["failed_renewals_30d"] = cnt(b30, "renewal_failed")
@@ -117,24 +126,27 @@ def build_signals(con):
     out["payment_switches_90d"] = cnt(b, "method_switch")
 
     # --- experience
-    a = q(con, "SELECT customer_id, ts, event FROM app_events WHERE ts >= ?", (ago(30),))
+    a = q(con, "SELECT customer_id, ts, event FROM app_events WHERE ts >= ? AND ts < ?", (ago(30), stamp))
     out["app_crashes_7d"] = cnt(a[a.ts >= ago(7)], "crash")
     out["login_failures_30d"] = cnt(a, "login_failure")
 
     # --- plan history, marketing
-    pc = q(con, "SELECT customer_id FROM plan_changes WHERE kind = 'downgrade' AND ts >= ?", (ago(90),))
+    pc = q(con, "SELECT customer_id FROM plan_changes WHERE kind = 'downgrade' AND ts >= ? AND ts < ?", (ago(90), stamp))
     out["plan_downgrades_90d"] = pc.groupby("customer_id").size().reindex(ids, fill_value=0).values
-    m = q(con, "SELECT customer_id, opened FROM marketing_offers WHERE sent_at >= ?", (ago(90),))
+    m = q(con, "SELECT customer_id, opened FROM marketing_offers WHERE sent_at >= ? AND sent_at < ?", (ago(90), stamp))
     out["offers_received_90d"] = m.groupby("customer_id").size().reindex(ids, fill_value=0).values
     out["offers_opened_90d"] = m.groupby("customer_id").opened.sum().reindex(ids, fill_value=0).values
 
     # --- support (latest ticket in the last 30 days)
-    t = q(con, "SELECT customer_id, opened_at, sentiment, resolved FROM support_tickets WHERE opened_at >= ? ORDER BY opened_at", (ago(30),))
+    t = q(con, "SELECT customer_id, opened_at, sentiment, resolved FROM support_tickets WHERE opened_at >= ? AND opened_at < ? ORDER BY opened_at", (ago(30), stamp))
     out["support_tickets_30d"] = t.groupby("customer_id").size().reindex(ids, fill_value=0).values
     latest = t.groupby("customer_id").last()
     out["ticket_sentiment"] = latest.sentiment.reindex(ids).fillna("none").values
     out["ticket_resolved"] = latest.resolved.reindex(ids).fillna(1).astype(int).values
 
+    if with_label:
+        end = (now + timedelta(days=horizon_days)).strftime(FMT)
+        out["churned"] = [int(c is not None and stamp < str(c) <= end) for c in cust.cancelled_at.values]
     stats = {
         "platform_time": now.strftime(FMT),
         "active_customers": int(len(cust)),
@@ -148,6 +160,62 @@ def build_signals(con):
 
 
 _lock, _cache = Lock(), {"t": 0, "csv": b"", "stats": {}, "prev": None}
+_ml_lock = Lock()
+REG = learn.Registry()
+
+
+def _live_and_past():
+    con, _ = connect()
+    try:
+        now = platform_now(con)
+        live, _ = build_signals(con)
+        past, _ = build_signals(con, as_of=now - timedelta(days=learn.HORIZON), with_label=True)
+    finally:
+        con.close()
+    return now.strftime(FMT), live, past
+
+
+def model_status(refresh=True):
+    """Everything the Model health page shows about the live learning loop."""
+    with _ml_lock:
+        t, live, past = _live_and_past()
+        REG.bootstrap(live, t)
+        if refresh:
+            REG.realized(past)
+        days_since = (datetime.strptime(t, FMT) - datetime.strptime(REG.r["last_retrain_at"], FMT)).total_seconds() / 86400
+        cand = dict(REG.r["candidate"]) if REG.r.get("candidate") else None
+        if cand:
+            cand.pop("reference", None)
+        return {"platform_time": t, "live_version": next(v for v in REG.r["versions"] if v["status"] == "live"),
+                "versions": REG.r["versions"], "candidate": cand, "realized": REG.r["realized"], "drift": REG.drift(live),
+                "reference_at": REG.r["reference_at"], "settings": REG.r["settings"], "days_since_retrain": round(days_since, 1),
+                "outcomes_available": int(past.churned.sum()), "horizon_days": learn.HORIZON}
+
+
+def retrain_now(auto_promote=None):
+    with _ml_lock:
+        t, live, past = _live_and_past()
+        REG.bootstrap(live, t)
+        REG.realized(past)
+        REG.retrain(past, t, live, auto_promote)
+    return model_status(refresh=False)
+
+
+def scheduler():
+    """Automatic retraining every N platform days (and promotion, only if auto-promote is on)."""
+    while True:
+        time.sleep(20)
+        try:
+            if REG.r is None:
+                continue
+            con, _ = connect(); now = platform_now(con); con.close()
+            last = datetime.strptime(REG.r["last_retrain_at"], FMT)
+            every = REG.r["settings"]["auto_retrain_days"]
+            if every and (now - last).total_seconds() / 86400 >= every:
+                print(f"{datetime.now():%H:%M:%S}  scheduled retrain (every {every} platform days)")
+                retrain_now()
+        except Exception as e:
+            print("scheduler:", e)
 
 
 def snapshot():
@@ -175,7 +243,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Access-Control-Allow-Origin", "*")                 # the web app runs on another origin
         self.send_header("Access-Control-Allow-Private-Network", "true")     # Chrome: public site -> local agent
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
         self.send_header("Cache-Control", "no-store")
         if length is not None:
@@ -191,6 +259,14 @@ class Handler(BaseHTTPRequestHandler):
                 _, stats = snapshot()
                 body = json.dumps({"status": "ok", "agent": "Churn Radar Connector 1.0", **stats}).encode()
                 self._headers(200, "application/json", len(body)); self.wfile.write(body)
+            elif self.path.startswith("/model/status"):
+                body = json.dumps(model_status()).encode()
+                self._headers(200, "application/json", len(body)); self.wfile.write(body)
+            elif self.path.startswith("/model"):
+                if REG.r is None:
+                    model_status()
+                body = learn.ACTIVE.read_bytes()
+                self._headers(200, "application/json", len(body)); self.wfile.write(body)
             elif self.path.startswith("/signals.csv"):
                 body, _ = snapshot()
                 self._headers(200, "text/csv", len(body)); self.wfile.write(body)
@@ -199,6 +275,31 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             body = json.dumps({"status": "error", "error": str(e)[:300]}).encode()
             self._headers(500, "application/json", len(body)); self.wfile.write(body)
+
+    def do_POST(self):
+        """Model operations, only from the network the agent serves: retrain, promote, settings."""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            data = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            if self.path.startswith("/model/retrain"):
+                out = retrain_now()
+            elif self.path.startswith("/model/promote"):
+                with _ml_lock:
+                    con, _ = connect(); t = platform_now(con).strftime(FMT); con.close()
+                    REG.promote(t, by="approved")
+                out = model_status(refresh=True)
+            elif self.path.startswith("/model/settings"):
+                st = REG.r["settings"]
+                if "auto_promote" in data: st["auto_promote"] = bool(data["auto_promote"])
+                if "auto_retrain_days" in data: st["auto_retrain_days"] = max(0, min(90, int(data["auto_retrain_days"])))
+                REG.save(); out = model_status(refresh=False)
+            else:
+                self._headers(404, "text/plain", 0); return
+            body = json.dumps(out).encode()
+            self._headers(200, "application/json", len(body)); self.wfile.write(body)
+        except Exception as e:
+            body = json.dumps({"status": "error", "error": str(e)[:300]}).encode()
+            self._headers(400, "application/json", len(body)); self.wfile.write(body)
 
     def log_message(self, fmt, *args):
         print(f"{datetime.now():%H:%M:%S}  {self.address_string()}  {fmt % args}")
@@ -210,4 +311,8 @@ if __name__ == "__main__":
     print("Open Churn Radar -> Data sources -> Live database, and connect to this address. Ctrl+C to stop.")
     _, st = snapshot()
     print(f"First snapshot: {st['active_customers']:,} active customers, platform time {st['platform_time']}, built in {st['build_seconds']}s")
+    st = model_status()
+    print(f"Live model v{st['live_version']['version']}: realised AUC {st['realized']['auc']} on last month's customers; "
+          f"auto-retrain every {st['settings']['auto_retrain_days']} platform days, auto-promote {'on' if st['settings']['auto_promote'] else 'off'}")
+    Thread(target=scheduler, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

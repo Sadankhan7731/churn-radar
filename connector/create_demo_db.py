@@ -29,7 +29,8 @@ import pandas as pd
 
 DB = Path(__file__).with_name("lumen_play.db")
 N = 10_000
-WEEKS = 8
+WEEKS = 12                     # 12 weeks: enough to rebuild 'what we knew 30 days ago' and learn from outcomes
+HISTORY_DAYS = 120
 rng = np.random.default_rng(2026)
 NOW = datetime.now().replace(minute=0, second=0, microsecond=0)
 ts = lambda d: d.strftime("%Y-%m-%d %H:%M:%S")
@@ -43,6 +44,15 @@ CITIES = ["Karachi", "Lahore", "Islamabad", "Faisalabad", "Peshawar", "Other"]
 def fail_chance(fragility, plan):
     """Chance a single renewal attempt fails. Frequent renewals (daily packs) fail less per attempt."""
     return fragility * (RENEW_EVERY[plan] / 30) ** 0.6
+
+
+def churn_monthly(base, trend, fragility, quality, temper, is_daily, quality_weight=1.0):
+    """The platform's TRUE monthly chance of a customer cancelling (hidden from the model).
+    quality_weight is raised by the simulator's 'market shift' (a competitor with a smoother app),
+    so poor streaming quality suddenly drives far more cancellations - the model has to adapt."""
+    m = 0.07 * np.exp(-0.9 * (np.asarray(base) / 300 - 1) - 2.0 * np.asarray(trend) + 3.0 * (np.asarray(fragility) - .12)
+                      + quality_weight * (np.asarray(quality) - .25) + 1.2 * (np.asarray(temper) - .28) + .35 * np.asarray(is_daily))
+    return np.clip(m, 0, .6)
 
 
 def make_customers(n, start_id, now, rng):
@@ -78,7 +88,17 @@ def make_customers(n, start_id, now, rng):
 
 def history(cust, traits, now, rng):
     sess, bill, app, tick, offers, recs, changes = [], [], [], [], [], [], []
-    for c, t in zip(cust.itertuples(), traits.itertuples()):
+    # Who cancelled in the past 60 days (the outcomes the system learns from)
+    monthly = churn_monthly(traits.base_minutes, traits.trend, traits.fragility, traits.quality_issue, traits.temper, cust.plan == "Daily")
+    tenure_days = (now - pd.to_datetime(cust.signup_date)).dt.days.values
+    window = np.minimum(60, tenure_days)
+    cancelled = rng.random(len(cust)) < 1 - np.exp(-monthly / 30 * window)
+    cancel_at = [now - timedelta(days=float(rng.uniform(0, w))) if c else None for c, w in zip(cancelled, window)]
+    cust["status"] = np.where(cancelled, "cancelled", "active")
+    cust["cancelled_at"] = [ts(x) if x else None for x in cancel_at]
+    for c, t, end in zip(cust.itertuples(), traits.itertuples(), cancel_at):
+        alive = lambda when: end is None or when < end
+        fading = lambda when: end is not None and when > end - timedelta(days=14)   # warning signs before leaving
         inactive_days = int(min(30, rng.exponential(3.0)))
         start_of_life = datetime.strptime(c.signup_date, "%Y-%m-%d %H:%M:%S")
         for w in range(WEEKS):                                                     # w = 0 oldest week
@@ -95,18 +115,21 @@ def history(cust, traits, now, rng):
                 if when > last_ok:                               # inactive lately: this session happened earlier
                     span = (last_ok - max(week_start, last_ok - timedelta(days=7))).total_seconds()
                     when = last_ok - timedelta(seconds=float(rng.uniform(0, max(span, 3600))))
-                if when < start_of_life:
+                if when < start_of_life or not alive(when):
                     continue
                 g = c.favourite_genre if rng.random() < t.concentration else rng.choice(GENRES)
-                sess.append((c.customer_id, ts(when), round(minutes / max(k, 1) * rng.uniform(.5, 1.5), 1), g,
+                sess.append((c.customer_id, ts(when), round(minutes / max(k, 1) * rng.uniform(.5, 1.5) * (.4 if fading(when) else 1), 1), g,
                              int(rng.random() < t.live_pref), int(rng.random() < t.completion),
                              round(float(np.clip(rng.gamma(2, 1.0) + 2 * (c.network == "3G"), .3, 15)), 1), int(rng.poisson(t.quality_issue * 1.4))))
         every = RENEW_EVERY[c.plan]
         d = 1
-        while d <= 90:
+        while d <= HISTORY_DAYS:
             when = now - timedelta(days=d)
             if when < start_of_life:
                 break
+            if not alive(when):
+                d += every
+                continue
             if rng.random() < fail_chance(t.fragility, c.plan):
                 bill.append((c.customer_id, ts(when), "renewal_failed", c.monthly_price_pkr))
                 if c.payment_channel.startswith("Operator") and rng.random() < .7:
@@ -114,30 +137,42 @@ def history(cust, traits, now, rng):
             else:
                 bill.append((c.customer_id, ts(when), "renewal_success", round(c.monthly_price_pkr * every / 30)))
             d += every
+        H = HISTORY_DAYS * 1440
+        at = lambda: now - timedelta(minutes=int(rng.integers(0, H)))
         if c.payment_channel.startswith("Operator"):
-            for _ in range(rng.poisson(9)):
-                bill.append((c.customer_id, ts(now - timedelta(minutes=int(rng.integers(0, 90 * 1440)))), "recharge", int(rng.choice([100, 200, 500]))))
-        for _ in range(rng.poisson(.15)):
-            bill.append((c.customer_id, ts(now - timedelta(minutes=int(rng.integers(0, 90 * 1440)))), "method_switch", 0))
-        for _ in range(rng.poisson(t.quality_issue * 1.2)):
-            app.append((c.customer_id, ts(now - timedelta(minutes=int(rng.integers(0, 7 * 1440)))), "crash"))
+            for _ in range(rng.poisson(12)):
+                w = at()
+                if alive(w): bill.append((c.customer_id, ts(w), "recharge", int(rng.choice([100, 200, 500]))))
         for _ in range(rng.poisson(.2)):
-            app.append((c.customer_id, ts(now - timedelta(minutes=int(rng.integers(0, 30 * 1440)))), "login_failure"))
-        for _ in range(rng.poisson(.3 + t.fragility + t.quality_issue * .5)):
+            w = at()
+            if alive(w): bill.append((c.customer_id, ts(w), "method_switch", 0))
+        for _ in range(rng.poisson(t.quality_issue * 1.2 * HISTORY_DAYS / 7)):
+            w = at()
+            if alive(w): app.append((c.customer_id, ts(w), "crash"))
+        for _ in range(rng.poisson(.2 * HISTORY_DAYS / 30)):
+            w = at()
+            if alive(w): app.append((c.customer_id, ts(w), "login_failure"))
+        for _ in range(rng.poisson((.3 + t.fragility + t.quality_issue * .5) * HISTORY_DAYS / 30)):
+            w = at()
+            if not alive(w): continue
             # quick-tempered customers write angrier tickets
             sentiment = "negative" if rng.random() < .25 + t.temper * .8 else ("neutral" if rng.random() < .75 else "positive")
-            tick.append((c.customer_id, ts(now - timedelta(minutes=int(rng.integers(0, 30 * 1440)))), sentiment, int(rng.random() < .65)))
-        for _ in range(rng.poisson(2.5)):
-            offers.append((c.customer_id, ts(now - timedelta(minutes=int(rng.integers(0, 90 * 1440)))), int(rng.random() < t.open_prob)))
-        for _ in range(rng.poisson(4)):
-            recs.append((c.customer_id, ts(now - timedelta(minutes=int(rng.integers(0, 30 * 1440)))), int(rng.random() < .4)))
-        if rng.random() < .07:
-            changes.append((c.customer_id, ts(now - timedelta(minutes=int(rng.integers(0, 90 * 1440)))), "downgrade"))
+            tick.append((c.customer_id, ts(w), sentiment, int(rng.random() < .65)))
+        for _ in range(rng.poisson(2.5 * HISTORY_DAYS / 90)):
+            w = at()
+            if alive(w): offers.append((c.customer_id, ts(w), int(rng.random() < t.open_prob)))
+        for _ in range(rng.poisson(4 * HISTORY_DAYS / 30)):
+            w = at()
+            if alive(w): recs.append((c.customer_id, ts(w), int(rng.random() < .4)))
+        if rng.random() < .09:
+            w = now - timedelta(minutes=int(rng.integers(0, HISTORY_DAYS * 1440)))
+            if alive(w): changes.append((c.customer_id, ts(w), "downgrade"))
     return sess, bill, app, tick, offers, recs, changes
 
 
 SCHEMA = """
 CREATE TABLE platform_clock (now TEXT NOT NULL);
+CREATE TABLE platform_settings (name TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE customers (customer_id TEXT PRIMARY KEY, signup_date TEXT, city TEXT, device TEXT, network TEXT, signup_source TEXT,
   favourite_genre TEXT, payment_channel TEXT, plan TEXT, monthly_price_pkr INTEGER, joined_on_discount INTEGER,
   past_cancellations INTEGER, status TEXT, cancelled_at TEXT);
@@ -177,7 +212,9 @@ if __name__ == "__main__":
     con.executemany("INSERT INTO content_releases VALUES (?,?,?,?,?)",
                     [(g, e, ts(NOW + timedelta(days=a)), n, ts(NOW + timedelta(days=b))) for g, e, a, n, b in rel])
     con.execute("INSERT INTO platform_clock VALUES (?)", (ts(NOW),))
+    con.execute("INSERT INTO platform_settings VALUES ('quality_weight', '1.0')")
     con.commit()
+    print(f"  cancelled in the last 60 days: {int((cust.status == 'cancelled').sum()):,} (the outcomes the system learns from)")
     for t in ["customers", "viewing_sessions", "billing_events", "app_events", "support_tickets", "marketing_offers", "recommendations", "plan_changes"]:
         print(f"  {t:18s} {con.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0]:>9,} rows")
     con.close()
