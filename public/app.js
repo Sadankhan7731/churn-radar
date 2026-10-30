@@ -668,7 +668,7 @@ async function liveSync(first = false) {
       const d = next.kpis.expected_churners - prev.kpis.expected_churners, h = LIVE.health;
       toast(`Synced · ${h.new_since_last ? "+" + h.new_since_last + " new" : "no new"} customers · ${h.gone_since_last} cancelled · expected cancellations ${d >= 0 ? "+" : ""}${d}`);
       const r = (location.hash.replace(/^#\/?/, "").split("/")[0]) || "";
-      if (CUR === "live" && ["", "segments", "reports", "data", "model"].includes(r) && $("#chat").hidden) route();
+      if (CUR === "live" && ["", "segments", "reports", "data"].includes(r) && $("#chat").hidden) route();
     }
   } catch (e) { LIVE.error = e.message; }
   LIVE.syncing = false; drawLive();
@@ -938,7 +938,11 @@ function renderChat() {
   log.innerHTML = (CHATS[CUR].length ? "" : `<div class="msg bot"><div class="bubble">Ask me about churn, or explore decisions: I can work out options with the What-if simulator and set them up there for you. I only see aggregate figures, and every number I give is computed by the model and checked.</div>
     <div class="chips" style="margin-top:8px">${SUGGEST.map(q => `<button class="chip" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div></div>`) +
     CHATS[CUR].map(m => m.role === "user" ? `<div class="msg user">${esc(m.content)}</div>` : m.error ? `<div class="msg bot"><div class="bubble">${esc(m.error)}</div>${m.retry ? `<div class="chips" style="margin-top:8px"><button class="chip" type="button" data-q="${esc(m.retry)}">Try again</button></div>` : ""}</div>` : renderAnswer(m)).join("");
-  $$("#chatLog [data-q]").forEach(c => c.onclick = () => ask(c.dataset.q));
+  $$("#chatLog [data-q]").forEach(c => c.onclick = () => {
+    const log = CHATS[CUR], last = log[log.length - 1];
+    if (last && last.error && last.retry === c.dataset.q) log.splice(-2, 2);   // "Try again" replaces the failed exchange
+    ask(c.dataset.q);
+  });
   $$("#chatLog [data-apply]").forEach(b => b.onclick = () => {
     const [id, k] = b.dataset.apply.split(":"), m = CHATS[CUR].find(x => x.id === id), c = m && m.computed[+k];
     if (!c) return;

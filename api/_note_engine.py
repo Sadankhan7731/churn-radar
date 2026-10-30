@@ -159,6 +159,16 @@ def _chat(messages, api_key, model, temperature=0.2, max_tokens=900, retries=2):
                     return rescued, {"model": model, "seconds": round(time.time() - t0, 2), "input_tokens": 0,
                                      "output_tokens": 0, "cost_usd": 0.0, "price_is_estimate": True, "rescued": True}
                 raise JSONReplyError("the model's reply was not valid JSON", partial) from None
+            if e.code == 400 and "tool_use_failed" in raw:   # gpt-oss sometimes wraps its JSON answer as a tool call
+                try:
+                    gen = json.loads(json.loads(raw)["error"]["failed_generation"])
+                    if isinstance(gen.get("arguments"), dict):
+                        return gen["arguments"], {"model": model, "seconds": round(time.time() - t0, 2), "input_tokens": 0,
+                                                  "output_tokens": 0, "cost_usd": 0.0, "price_is_estimate": True, "rescued": True}
+                except (ValueError, KeyError, TypeError):
+                    pass
+                if attempt < retries:
+                    continue
             raise RuntimeError(f"Groq returned {e.code}: {raw[:300]}") from None
     usage = data.get("usage", {})
     tin, tout = usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
