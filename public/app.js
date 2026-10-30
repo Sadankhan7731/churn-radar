@@ -17,7 +17,9 @@ const store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
 };
-let D, NOTE, FACTS;
+let D, NOTE, FACTS, DEMO, DEMO_NOTE, MODEL;
+let CUR = "demo";
+const NOTES = {};          // weekly briefing per dataset
 let charts = [];
 const page = () => $("#main .page");
 
@@ -139,11 +141,11 @@ const REPORTS = {
       return [kpi("Likely to cancel (30d)", NUM(D.kpis.expected_churners), PCT(D.kpis.expected_churn_rate, 1) + " of active customers"),
               kpi("Revenue at risk / month", PKRs(D.kpis.revenue_at_risk_pkr), PKRs(D.kpis.revenue_at_risk_pkr * 12) + " annualised", "red"),
               kpi("Largest exposed group", esc(p.persona), PKRs(p.revenue_at_risk_pkr) + " / month at risk")]; },
-    body: () => panel("Churn drivers", themeBars(), { sub: "Share of the 10,000 highest-risk customers with each driver among their top reasons" }),
-    recs: () => { const pay = D.personas.find(p => p.persona === "Payment-troubled"), sp = D.content.find(c => c.genre === "Sports");
-      return [["Fix renewal failures with operator partners", `${NUM(pay.subscribers)} customers have repeated failed renewals, carrying ${PKRs(pay.revenue_at_risk_pkr)} / month at risk. A process fix, not a discount.`, "#/reports/billing"],
-              ["Bridge the gap to the next big sports event", `${NUM(sp.high_risk_waiting)} high-risk sports fans wait ${sp.next_release_in_days} days for the ${sp.next_title}.`, "#/reports/content"],
-              ["Approve a targeted campaign for the top 10%", `Projected net impact ${PKRs(base().net)} / month; the same offer sent at random loses money.`, "#/campaigns"]]; } },
+    body: () => panel("Churn drivers", themeBars(), { sub: `Share of the ${NUM(D.kpis.high_risk_subscribers)} highest-risk customers with each driver among their top reasons` }),
+    recs: () => { const pay = D.personas.find(p => p.persona === "Payment-troubled"), sp = [...(D.content || [])].sort((a, b) => b.high_risk_waiting - a.high_risk_waiting)[0];
+      return [pay && pay.subscribers ? ["Fix renewal failures with billing partners", `${NUM(pay.subscribers)} customers have repeated failed renewals, carrying ${PKRs(pay.revenue_at_risk_pkr)} / month at risk. A process fix, not a discount.`, "#/reports/billing"] : null,
+              sp ? [`Bridge the gap to the next ${sp.genre.toLowerCase()} release`, `${NUM(sp.high_risk_waiting)} high-risk ${sp.genre.toLowerCase()} fans wait ${sp.next_release_in_days} days for ${sp.next_title === "Next release" ? "something new" : "the " + sp.next_title}.`, "#/reports/content"] : null,
+              ["Approve a targeted campaign for the top 10%", `Projected net impact ${PKRs(base().net)} / month; the same offer sent at random ${base().rNet < 0 ? "loses money" : "returns far less"}.`, "#/campaigns"]].filter(Boolean); } },
   cfo: { name: "Revenue & ROI", color: "#16a34a", desc: "What churn costs, and the return on acting.",
     summary: () => { const b = base(); return `Churn puts <b>${PKRs(D.kpis.revenue_at_risk_pkr)}</b> of revenue at risk each month. A 15% offer to the top 10% costs about <b>${PKRs(b.cost)}</b> and protects about <b>${PKRs(b.protectedRev)}</b> — a net <b>${PKRs(b.net)}</b> per month. Sent to random customers, the same offer would lose <b>${PKRs(-b.rNet)}</b>.`; },
     kpis: () => { const b = base(); return [kpi("Revenue at risk / year", PKRs(D.kpis.revenue_at_risk_pkr * 12), "if no action is taken", "red"),
@@ -164,7 +166,7 @@ const REPORTS = {
     recs: () => [["Work the list from the top", "The at-risk list is ordered by probability, with the main reason and a suggested action.", "#/customers"],
                  ["Match the message to the group", "Payment help, a quality apology or a content reminder outperform one generic offer.", "#/customers"],
                  ["Keep a person in the loop", "Approve each outreach; nothing is sent automatically.", "#/customers"]] },
-  content: { name: "Content & schedule", color: "#9333ea", desc: "Which releases keep or lose viewers.",
+  content: { name: "Content & schedule", color: "#9333ea", desc: "Which releases keep or lose viewers.", needs: ["favourite_genre", "fav_content_ended"], ok: () => D.content && D.content.length,
     summary: () => { const c = D.content.filter(x => x.fans_whose_title_ended).sort((a, b) => b.high_risk_waiting - a.high_risk_waiting), soon = [...c].sort((a, b) => a.next_release_in_days - b.next_release_in_days)[0];
       return `<b>${NUM(c[0].high_risk_waiting)}</b> high-risk ${c[0].genre.toLowerCase()} fans finished <b>${esc(c[0].ended_title)}</b> and wait <b>${c[0].next_release_in_days} days</b> for ${esc(c[0].next_title)}. ${soon.genre} fans, with a release in ${soon.next_release_in_days} days, are far less likely to leave. Gaps between tentpole releases drive churn.`; },
     kpis: () => { const c = D.content.filter(x => x.fans_whose_title_ended), long = [...c].sort((a, b) => b.next_release_in_days - a.next_release_in_days)[0];
@@ -177,9 +179,9 @@ const REPORTS = {
     recs: () => [["Fill the sports gap this week", "Highlights, classic matches and a countdown to the next event for waiting fans.", "#/customers"],
                  ["Announce release dates early", "Fans who know something is coming are much less likely to leave.", "#/segments"],
                  ["Broaden single-category viewers", "Recommend one adjacent category to customers who watch only one.", "#/segments"]] },
-  product: { name: "Product & quality", color: "#0891b2", desc: "App and streaming issues that drive cancellations.",
-    summary: () => { const q = D.personas.find(p => p.persona === "Frustrated by quality"), n = D.segments.network, g3 = n.find(x => x.segment === "3G"), wf = n.find(x => x.segment === "WiFi");
-      return `<b>${NUM(q.subscribers)}</b> customers had a poor experience — buffering, crashes, slow starts or a negative ticket — and <b>${NUM(q.high_risk)}</b> are high-risk. Customers on <b>3G</b> average <b>${PCT(g3.avg_risk, 1)}</b> risk vs ${PCT(wf.avg_risk, 1)} on WiFi.`; },
+  product: { name: "Product & quality", color: "#0891b2", desc: "App and streaming issues that drive cancellations.", needs: ["network", "device"], ok: () => D.segments.network && D.segments.device,
+    summary: () => { const q = D.personas.find(p => p.persona === "Frustrated by quality"), n = D.segments.network, hi = n[0], lo = n[n.length - 1];
+      return `<b>${NUM(q.subscribers)}</b> customers had a poor experience — buffering, crashes, slow starts or a negative ticket — and <b>${NUM(q.high_risk)}</b> are high-risk. Customers on <b>${esc(hi.segment)}</b> average <b>${PCT(hi.avg_risk, 1)}</b> risk vs ${PCT(lo.avg_risk, 1)} on ${esc(lo.segment)}.`; },
     kpis: () => { const q = D.personas.find(p => p.persona === "Frustrated by quality"), sup = D.theme_summary.find(t => t.theme === "Support"), exp = D.theme_summary.find(t => t.theme === "Experience");
       return [kpi("Frustrated by quality", NUM(q.subscribers), PKRs(q.revenue_at_risk_pkr) + " / month at risk"),
               kpi("High-risk with bad support", PCT(sup ? sup.share : 0), "of the top 10%", "red"),
@@ -189,7 +191,7 @@ const REPORTS = {
     recs: () => [["Start video at lower quality on slow networks", "Start times over 4 seconds clearly raise churn; 3G users are hit hardest.", "#/segments"],
                  ["Answer negative tickets within 24 hours", "A negative ticket is one of the strongest single warning signs.", "#/customers"],
                  ["Keep it in proportion", "App issues matter, but content gaps and payment failures affect far more high-risk customers.", "#/reports/ceo"]] },
-  billing: { name: "Billing & payments", color: "#ca8a04", desc: "How payment failures cost subscribers.",
+  billing: { name: "Billing & payments", color: "#ca8a04", desc: "How payment failures cost subscribers.", needs: ["payment_channel"], ok: () => D.segments.payment_channel,
     summary: () => { const p = D.personas.find(x => x.persona === "Payment-troubled"), ch = D.segments.payment_channel[0];
       return `<b>${NUM(p.subscribers)}</b> customers have repeated failed or low-balance renewals; <b>${NUM(p.high_risk)}</b> are high-risk, carrying <b>${PKRs(p.revenue_at_risk_pkr)}</b> / month. They want to stay — the bill is the problem. <b>${esc(ch.segment)}</b> is the riskiest payment channel.`; },
     kpis: () => { const p = D.personas.find(x => x.persona === "Payment-troubled"), t = D.theme_summary.find(x => x.theme === "Payment");
@@ -207,10 +209,10 @@ function pOverview() {
   const k = D.kpis, b = base();
   const segs = [];
   for (const [dim, label] of [["plan", "Plan"], ["payment_channel", "Payment"], ["favourite_genre", "Genre"], ["signup_source", "Acquisition"], ["network", "Network"]])
-    D.segments[dim].filter(s => s.subscribers >= 3000).forEach(s => segs.push({ ...s, dim: label }));
+    (D.segments[dim] || []).filter(s => s.subscribers >= Math.max(50, k.subscribers * 0.03)).forEach(s => segs.push({ ...s, dim: label }));
   segs.sort((a, c) => c.avg_risk - a.avg_risk);
   return `
-  <div class="ph"><div><h1>Overview</h1><p>Weekly churn outlook for Lumen Play's paying customers, next 30 days.</p></div>
+  <div class="ph"><div><h1>Overview</h1><p>${D.dataset && D.dataset.own ? `Churn outlook for <b>${esc(D.dataset.name)}</b> (${NUM(D.kpis.subscribers)} customers), scored in your browser.` : "Weekly churn outlook for Lumen Play's paying customers, next 30 days."}</p></div>
     <div class="ph-actions"><a class="btn btn-secondary" href="#/briefing">Read briefing</a><a class="btn" href="#/customers">Review at-risk customers</a></div></div>
   <div class="grid c4">
     ${kpi("Likely to cancel", NUM(k.expected_churners), `${PCT(k.expected_churn_rate, 1)} of ${NUM(k.subscribers)} customers`, "", "Sum of every customer's predicted probability of cancelling in the next 30 days.")}
@@ -224,12 +226,12 @@ function pOverview() {
       `<tr><td><span class="pill ${band(r.from + 0.001)[1]}">${r.band}</span> <span class="muted" style="font-size:12px">${PCT(r.from)}${r.to < 1 ? "–" + PCT(r.to) : "+"}</span></td><td class="r">${NUM(r.customers)}</td><td class="r">${PKRs(r.revenue_at_risk_pkr)}</td></tr>`).join("")}</tbody></table></div>`, { flush: true })}
   </div>
   <div class="grid c2 mt">
-    ${panel("Churn drivers", themeBars(), { sub: "Among the 10,000 highest-risk customers" })}
+    ${panel("Churn drivers", themeBars(), { sub: `Among the ${NUM(D.kpis.high_risk_subscribers)} highest-risk customers` })}
     ${panel("Recommended this week", `<ul class="alist">${REPORTS.ceo.recs().map(([t, d, h], i) => `<li><span class="n">${i + 1}</span><div><b>${t}</b><p>${d}</p><a href="${h}">Open →</a></div></li>`).join("")}</ul>`, { flush: true })}
   </div>
   <div class="mt">${panel("Segments to watch", `<div class="tbl-wrap"><table><thead><tr><th>Segment</th><th>Dimension</th><th class="r">Customers</th><th class="r">Avg risk</th><th class="r">Expected leavers</th><th class="r">At risk / mo</th></tr></thead><tbody>${segs.slice(0, 6).map(s =>
     `<tr><td><b>${esc(s.segment)}</b></td><td class="muted">${s.dim}</td><td class="r">${NUM(s.subscribers)}</td><td class="r">${PCT(s.avg_risk, 1)}<span class="mini-bar"><span style="width:${Math.min(100, s.avg_risk / 0.2 * 100)}%"></span></span></td><td class="r">${NUM(s.expected_churners)}</td><td class="r">${PKRs(s.revenue_at_risk_pkr)}</td></tr>`).join("")}</tbody></table></div>`,
-    { flush: true, sub: "Highest average risk, segments with 3,000+ customers", right: `<a class="btn btn-ghost" href="#/segments">All segments →</a>` })}</div>
+    { flush: true, sub: "Highest average risk among the larger segments", right: `<a class="btn btn-ghost" href="#/segments">All segments →</a>` })}</div>
   <div class="mt"><div class="panel-h" style="border:0;padding:6px 2px 10px"><h2>Reports</h2></div>
     <div class="grid c3">${Object.entries(REPORTS).map(([id, r]) => `<a class="rtile" href="#/reports/${id}"><span class="top"><i style="--c:${r.color}"></i>${r.name}</span><p>${r.desc}</p></a>`).join("")}</div></div>`;
 }
@@ -252,10 +254,14 @@ function sentence(text, chk) {
   return `<span class="${ok ? "" : "flagged"}">${t}<sup>${ids.join(",")}</sup></span>`;
 }
 function pBriefing() {
+  if (!NOTE) return `<div class="ph"><div><h1>Weekly briefing</h1><p>Written by AI from the active dataset's figures, then checked twice before it reaches you.</p></div></div>
+    <section class="panel panel-b" style="text-align:center;padding:44px 20px"><h2 style="font-size:15px">No briefing yet for ${esc(D.dataset.name)}</h2>
+    <p class="muted" style="margin:6px auto 16px;max-width:480px">Generating sends only aggregate figures (totals, shares and segment averages) to the AI. Customer rows stay in your browser.</p>
+    <button class="btn" id="regen" type="button">Generate briefing</button></section>`;
   return `<div class="ph"><div><h1>Weekly briefing</h1><p>Written by AI from this week's figures, then checked twice before it reaches you.</p></div>
     <div class="ph-actions"><button class="btn btn-secondary" id="regen" type="button">Regenerate</button></div></div>
   <div class="grid c-2-1" style="align-items:start">
-    <article class="panel mail"><div class="mail-h"><h1 id="mSubject"></h1><dl class="mail-meta"><dt>From</dt><dd>Churn Radar</dd><dt>To</dt><dd>Retention leadership, Lumen Play</dd><dt>Date</dt><dd>${today}</dd></dl></div>
+    <article class="panel mail"><div class="mail-h"><h1 id="mSubject"></h1><dl class="mail-meta"><dt>From</dt><dd>Churn Radar</dd><dt>To</dt><dd>Retention leadership${D.dataset && D.dataset.own ? " · " + esc(D.dataset.name) : ", Lumen Play"}</dd><dt>Date</dt><dd>${today}</dd></dl></div>
       <div class="mail-b" id="mBody"></div>
       <div class="mail-f"><label class="toggle"><input type="checkbox" id="srcT"> Show source figures</label><span id="mStatus"></span></div></article>
     <div class="grid"><section class="panel"><div class="panel-h"><h2>Verification</h2></div><ul class="checks" id="checks"></ul></section>
@@ -263,7 +269,18 @@ function pBriefing() {
       <section class="panel"><div class="panel-h"><h2>Run details</h2></div><div class="panel-b flush"><table><tbody id="run"></tbody></table></div></section></div>
   </div>`;
 }
+async function regenerate(e) {
+  const b = e.target, label = b.textContent; b.disabled = true; b.textContent = "Generating…";
+  try {
+    const own = D.dataset && D.dataset.own;
+    const r = await fetch("/api/weekly_note", { method: "POST", headers: { "Content-Type": "application/json" }, body: own ? JSON.stringify({ facts: Engine.facts(D) }) : "{}" });
+    const j2 = await r.json(); if (!r.ok) throw new Error(j2.error || r.statusText);
+    NOTE = { ...j2.note, trap_test: own ? null : DEMO_NOTE.trap_test }; FACTS = j2.facts; NOTES[CUR] = { note: NOTE, facts: FACTS };
+    route(); toast("Briefing generated and verified");
+  } catch (err) { toast("Couldn't generate: " + err.message.slice(0, 70)); b.disabled = false; b.textContent = label; }
+}
 function aBriefing() {
+  if (!NOTE) { $("#regen").onclick = regenerate; return; }
   const v = NOTE.verification, s = v.sentences; let i = 0;
   const part = p => p.split(SPLIT).filter(Boolean).map(x => sentence(x, s[i++])).join(" ");
   $("#mSubject").textContent = NOTE.headline;
@@ -282,13 +299,7 @@ function aBriefing() {
     ["Cost", `$${total.toFixed(4)} (≈ PKR ${(total * 280).toFixed(2)})`], ["Latency", m.seconds + "s"], ["Drafts", drafts]]
     .map(([a, b]) => `<tr><td class="muted">${a}</td><td class="r">${b}</td></tr>`).join("");
   $("#srcT").onchange = e => $("#mBody").classList.toggle("src", e.target.checked);
-  $("#regen").onclick = async e => {
-    const b = e.target; b.disabled = true; b.textContent = "Generating…";
-    try { const r = await fetch("/api/weekly_note", { method: "POST" }), j2 = await r.json(); if (!r.ok) throw new Error(j2.error || r.statusText);
-      NOTE = { ...j2.note, trap_test: NOTE.trap_test }; FACTS = j2.facts; aBriefing(); toast("New briefing generated and verified");
-    } catch (err) { toast("Couldn't generate: " + err.message.slice(0, 60)); }
-    finally { b.disabled = false; b.textContent = "Regenerate"; }
-  };
+  $("#regen").onclick = regenerate;
 }
 
 // ---- customers
@@ -302,7 +313,7 @@ function filtered() {
 }
 function pCustomers() {
   const opt = (id, label, vals) => `<select class="sel" id="${id}" aria-label="${label}"><option value="">${label}</option>${vals.map(v => `<option${cf[id.slice(1).toLowerCase()] === v ? " selected" : ""}>${esc(v)}</option>`).join("")}</select>`;
-  return `<div class="ph"><div><h1>At-risk customers</h1><p>The 500 customers most likely to cancel in the next 30 days. Approving adds a customer to this week's outreach list; nothing is sent automatically.</p></div>
+  return `<div class="ph"><div><h1>At-risk customers</h1><p>The ${NUM(D.watchlist.length)} customers most likely to cancel in the next 30 days. Approving adds a customer to this week's outreach list; nothing is sent automatically.</p></div>
     <div class="ph-actions"><button class="btn btn-secondary" id="export" type="button"><svg viewBox="0 0 20 20"><path d="M10 3v10M6 9l4 4 4-4M4 16h12"/></svg>Export CSV</button></div></div>
   <section class="panel">
     <div class="filters">
@@ -377,21 +388,22 @@ function openCustomer(id) {
 const SEG = { plan: "Plan", payment_channel: "Payment", favourite_genre: "Genre", signup_source: "Acquisition", network: "Network", device: "Device", city: "City" };
 let segKey = "plan";
 function pSegments() {
+  if (!D.segments[segKey]) segKey = Object.keys(SEG).find(k => D.segments[k]) || "plan";
   return `<div class="ph"><div><h1>Segments</h1><p>Compare customer groups by predicted risk and revenue exposure.</p></div></div>
-  <section class="panel"><div class="panel-h"><div class="seg" role="group" aria-label="Dimension">${Object.entries(SEG).map(([k, l]) => `<button type="button" data-seg="${k}" aria-pressed="${k === segKey}">${l}</button>`).join("")}</div>
+  <section class="panel"><div class="panel-h"><div class="seg" role="group" aria-label="Dimension">${Object.entries(SEG).filter(([k]) => D.segments[k]).map(([k, l]) => `<button type="button" data-seg="${k}" aria-pressed="${k === segKey}">${l}</button>`).join("")}</div>
     <span class="sub">Company average: ${PCT(D.kpis.expected_churn_rate, 1)}</span></div><div class="tbl-wrap"><table><thead><tr><th>Segment</th><th class="r">Customers</th><th>Avg risk</th><th class="r">Expected leavers</th><th class="r">In top 10%</th><th class="r">At risk / mo</th></tr></thead><tbody id="segRows"></tbody></table></div></section>
   <div class="grid c2 mt">
     ${panel("Customer groups", `<div class="tbl-wrap"><table><thead><tr><th>Group</th><th class="r">Customers</th><th class="r">Avg risk</th><th class="r">At risk / mo</th></tr></thead><tbody>${D.personas.map(p =>
       `<tr><td><div class="who"><span class="avatar" style="--c:${GROUP_COLOR[p.persona]}">${p.persona[0]}</span><span><b>${esc(p.persona)}</b><small>${esc(p.description)}</small></span></div></td><td class="r">${NUM(p.subscribers)}</td><td class="r">${PCT(p.avg_risk, 1)}</td><td class="r">${PKRs(p.revenue_at_risk_pkr)}</td></tr>`).join("")}</tbody></table></div>`,
       { flush: true, sub: "Assigned in order: fixable problems first" })}
-    ${panel("Release schedule", `<div class="tbl-wrap"><table><thead><tr><th>Genre</th><th>Next release</th><th class="r">Waiting</th><th class="r">High-risk</th></tr></thead><tbody>${D.content.filter(c => c.fans_whose_title_ended).map(c =>
+    ${panel("Release schedule", `<div class="tbl-wrap"><table><thead><tr><th>Genre</th><th>Next release</th><th class="r">Waiting</th><th class="r">High-risk</th></tr></thead><tbody>${(D.content || []).filter(c => c.fans_whose_title_ended).map(c =>
       `<tr><td><b>${esc(c.genre)}</b><div class="muted" style="font-size:12px">${esc(c.ended_title)} ended ${c.ended_days_ago}d ago</div></td><td>${esc(c.next_title)}<div class="muted" style="font-size:12px">in ${c.next_release_in_days} days</div></td><td class="r">${NUM(c.fans_whose_title_ended)}</td><td class="r"><b>${NUM(c.high_risk_waiting)}</b></td></tr>`).join("")}</tbody></table></div>`,
       { flush: true, sub: "Fans whose followed title just ended" })}
   </div>`;
 }
 function aSegments() {
   const draw = () => {
-    const rows = D.segments[segKey], mx = Math.max(...rows.map(r => r.avg_risk));
+    const rows = D.segments[segKey] || [], mx = Math.max(...rows.map(r => r.avg_risk));
     $("#segRows").innerHTML = rows.map(s => `<tr><td><b>${esc(s.segment)}</b></td><td class="r">${NUM(s.subscribers)}</td>
       <td style="min-width:180px"><div style="display:flex;align-items:center;gap:10px"><div class="lbar" style="flex:1"><span class="${s.avg_risk > D.kpis.expected_churn_rate ? "brand" : ""}" style="width:${s.avg_risk / mx * 100}%"></span></div><span class="num" style="width:44px;text-align:right">${PCT(s.avg_risk, 1)}</span></div></td>
       <td class="r">${NUM(s.expected_churners)}</td><td class="r">${NUM(s.high_risk)}</td><td class="r">${PKRs(s.revenue_at_risk_pkr)}</td></tr>`).join("");
@@ -435,9 +447,9 @@ function aCampaigns() {
 
 // ---- model health
 function pModel() {
-  const m = D.model, c = m.ceiling, t = NOTE.trap_test, v = NOTE.verification;
+  const m = D.model, c = m.ceiling, t = DEMO_NOTE.trap_test, v = DEMO_NOTE.verification;
   const target = (name, val, goal, ok, note) => `<tr><td>${name}</td><td class="r">${val}</td><td class="r muted">${goal}</td><td>${ok ? '<span class="pill ok">Met</span>' : '<span class="pill no">Not met</span>'}</td><td class="muted" style="min-width:220px">${note}</td></tr>`;
-  return `<div class="ph"><div><h1>Model health</h1><div class="status-line" style="margin-top:6px"><span class="dot"></span>Churn model v2 · logistic regression · ${D.kpis.signals} signals · trained on 70,000 customers, tested on 30,000 held out</div></div></div>
+  return `<div class="ph"><div><h1>Model health</h1><div class="status-line" style="margin-top:6px"><span class="dot"></span>Churn model v2 · logistic regression · ${D.kpis.signals} signals · trained on 70,000 customers, tested on 30,000 held out</div>${D.dataset && D.dataset.own ? `<p style="margin-top:8px">Accuracy below was measured on the held-out Lumen Play test set. Your own data has no known outcomes yet, so its accuracy can only be measured after 30 days.</p>` : ""}</div></div>
   <div class="grid c4">
     ${kpi("Hit rate, top 10%", PCT(m.precision_top10, 1), "flagged customers who actually leave", "", "Precision in the top decile.")}
     ${kpi("Lift vs random", m.lift_top10.toFixed(1) + "×", "more leavers reached", "green")}
@@ -478,6 +490,10 @@ function aModel() {
 // ---- report
 function pReport(id) {
   const r = REPORTS[id];
+  if (r.ok && !r.ok()) return `<div class="ph"><div><h1>${r.name}</h1><p>${r.desc}</p></div></div>
+    <section class="panel panel-b" style="text-align:center;padding:40px 20px"><h2 style="font-size:15px">This report needs more columns</h2>
+    <p class="muted" style="margin:6px auto 16px;max-width:460px">The active dataset doesn't include ${r.needs.map(n => `<code>${n}</code>`).join(" and ")}. Map these columns on the Data sources page, or switch to the sample dataset.</p>
+    <a class="btn" href="#/data">Open Data sources</a></section>`;
   return `<div class="ph"><div><h1>${r.name}</h1><p>${r.desc}</p></div><div class="ph-actions"><button class="btn btn-secondary" type="button" onclick="window.print()">Print</button></div></div>
   <div class="callout"><span class="label">Summary</span>${r.summary()}</div>
   <div class="grid c3 mt">${r.kpis().join("")}</div>
@@ -485,16 +501,217 @@ function pReport(id) {
   <div class="mt">${panel("Recommendations", `<ul class="alist">${r.recs().map(([t, d, h], i) => `<li><span class="n">${i + 1}</span><div><b>${t}</b><p>${d}</p>${h ? `<a href="${h}">Open →</a>` : ""}</div></li>`).join("")}</ul>`, { flush: true })}</div>`;
 }
 
+// ---- data sources: bring your own data
+let staged = null;                         // { name, source, rows, columns, map }
+const MAX_ROWS = 250000;
+const SHEETJS = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+function loadScript(src) { return new Promise((ok, no) => { if ([...document.scripts].some(s => s.src === src)) return ok();
+  const s = Object.assign(document.createElement("script"), { src, onload: ok, onerror: () => no(new Error("couldn't load the Excel reader")) }); document.head.appendChild(s); }); }
+const parseCSVText = text => new Promise((ok, no) => Papa.parse(text, { header: true, skipEmptyLines: true, complete: r => ok(r.data), error: no }));
+const parseCSVFile = file => new Promise((ok, no) => Papa.parse(file, { header: true, skipEmptyLines: true, complete: r => ok(r.data), error: no }));
+async function parseExcel(file) {
+  await loadScript(SHEETJS);
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+}
+function sheetUrl(u) {
+  const m = u.match(/docs\.google\.com\/spreadsheets\/d\/([^/]+)/);
+  if (!m || /output=csv|format=csv/.test(u)) return u;
+  const gid = (u.match(/[#&?]gid=(\d+)/) || [])[1] || "0";
+  return `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv&gid=${gid}`;
+}
+function stage(name, source, rows) {
+  rows = rows.filter(r => Object.values(r).some(v => v !== "" && v != null));
+  if (!rows.length) throw new Error("the file has no data rows");
+  if (rows.length > MAX_ROWS) { toast(`Using the first ${NUM(MAX_ROWS)} of ${NUM(rows.length)} rows (Growth plan limit)`); rows = rows.slice(0, MAX_ROWS); }
+  const columns = Object.keys(rows[0]);
+  staged = { name, source, rows, columns, map: Engine.autoMap(columns) };
+  drawMapping();
+  $("#mapStep").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+async function ingest(kind, payload) {
+  try {
+    if (kind === "file") {
+      const f = payload, ext = f.name.split(".").pop().toLowerCase();
+      if (f.size > 60e6) throw new Error("files up to 60 MB are supported");
+      const rows = ["xlsx", "xls"].includes(ext) ? await parseExcel(f) : await parseCSVFile(f);
+      stage(f.name.replace(/\.[^.]+$/, ""), ["xlsx", "xls"].includes(ext) ? "Excel upload" : "CSV upload", rows);
+    } else if (kind === "url") {
+      const r = await fetch(sheetUrl(payload)); if (!r.ok) throw new Error(`the link returned ${r.status}`);
+      const text = await r.text(); if (/^\s*<(!doctype|html)/i.test(text)) throw new Error("the link isn't a public CSV. In Google Sheets use File → Share → Publish to web → CSV");
+      stage(payload.includes("google") ? "Google Sheet" : payload.split("/").pop().replace(/\.[^.]+$/, "") || "Linked CSV", payload.includes("google") ? "Google Sheets" : "CSV link", await parseCSVText(text));
+    } else if (kind === "sample") {
+      const text = await (await fetch("samples/lumen_play_sample.csv")).text();
+      stage("Lumen Play sample export", "Sample file", await parseCSVText(text));
+    }
+  } catch (err) { toast("Couldn't read the data: " + err.message); }
+}
+function pData() {
+  const conn = (logo, color, title, sub, body) => `<div class="conn"><div class="conn-h"><span class="conn-logo" style="background:${color}">${logo}</span><b>${title}<small>${sub}</small></b></div>${body}</div>`;
+  return `<div class="ph"><div><h1>Data sources</h1><p>Bring your own customer data. Churn Radar matches your columns to its ${Engine.FIELDS.length} signals and scores every customer with the trained model.</p></div>
+    ${DATASETS.mine ? `<div class="ph-actions"><span class="own-badge">Active: ${esc(DATASETS.mine.dataset.name)} · ${NUM(DATASETS.mine.kpis.subscribers)} customers</span></div>` : ""}</div>
+  <div class="privacy"><svg viewBox="0 0 20 20"><path d="M10 2.5 4 5v4.5c0 3.8 2.6 6.9 6 8 3.4-1.1 6-4.2 6-8V5z"/><path d="m7.5 10 1.8 1.8 3.4-3.6"/></svg>
+    <div><b>Your data stays on your device.</b> Files are read and scored in this browser tab and are never uploaded to our servers. The AI assistant and briefing receive only aggregate figures — totals, shares and segment averages — never names, phone numbers or customer IDs. Data is cleared when you close the tab.</div></div>
+  <div class="grid c3">
+    ${conn("CSV", "#16a34a", "Upload a file", "CSV or Excel (.xlsx)", `<label class="drop" id="drop" tabindex="0"><input type="file" id="fileIn" accept=".csv,.xlsx,.xls,text/csv" hidden><b>Drop a file here</b> or click to browse<br><span class="muted" style="font-size:12px">One row per customer · up to ${NUM(MAX_ROWS)} rows</span></label>`)}
+    ${conn("GS", "#0f9d58", "Google Sheets or CSV link", "Live link, refreshed on each load", `<p>Publish the sheet to the web as CSV, or paste any public CSV link.</p>
+      <form class="row" id="urlForm"><input class="input" id="urlIn" type="url" placeholder="https://docs.google.com/spreadsheets/…" style="flex:1;min-width:0" required><button class="btn" type="submit">Connect</button></form>`)}
+    ${conn("LP", "#F0562A", "Sample data", "2,000 Lumen Play customers", `<p>Try the full flow with a sample export, or start from the template.</p>
+      <div class="row"><button class="btn" id="sampleBtn" type="button">Load sample</button><a class="btn btn-secondary" href="samples/template.csv" download>Template</a></div>`)}
+    ${conn("SQL", "#a91d22", "Microsoft SQL Server", "Export, then upload", `<p>Run our query against your warehouse, save the result as CSV and upload it here. Rename tables to match your schema.</p>
+      <div class="row"><a class="btn btn-secondary" href="samples/sqlserver_query.sql" download>Download SQL query</a></div>`)}
+    ${conn("XL", "#107c41", "Microsoft Excel", "Workbooks and exports", `<p>Upload .xlsx directly; the first sheet is used. Column names don't need to match exactly.</p><div class="row"><button class="btn btn-secondary" type="button" onclick="document.getElementById('fileIn').click()">Choose workbook</button></div>`)}
+    <div class="conn muted-conn"><div class="conn-h"><span class="conn-logo" style="background:#71717a">DB</span><b>Direct database connectors<small>Enterprise</small></b></div>
+      <p>Live, scheduled connections to SQL Server, PostgreSQL, Snowflake and BigQuery run inside your own network, so credentials and customer rows never pass through a public website.</p>
+      <div class="row"><span class="pill neutral plain">On the roadmap</span></div></div>
+  </div>
+  <section class="panel mt" id="mapStep" ${staged ? "" : "hidden"}></section>`;
+}
+function drawMapping() {
+  const el = $("#mapStep"); if (!el || !staged) return;
+  const { name, rows, columns, map } = staged;
+  const matched = Engine.FIELDS.filter(([k]) => map[k]).length, groups = [...new Set(Engine.FIELDS.map(f => f[2]))];
+  el.hidden = false;
+  el.innerHTML = `<div class="panel-h"><div><h2>Map your columns</h2><div class="sub">${esc(name)} · ${NUM(rows.length)} rows · ${columns.length} columns detected</div></div>
+    <div style="min-width:220px"><div class="sub" style="margin-bottom:5px">${matched} of ${Engine.FIELDS.length} signals mapped</div><div class="meter"><span style="width:${matched / Engine.FIELDS.length * 100}%"></span></div></div></div>
+    <div class="panel-b">
+      <p class="muted" style="margin-bottom:12px;font-size:13px">We matched columns by name. Fix any that are wrong. Signals you don't have are filled with typical values and won't be used as reasons, so the more you map, the sharper the scores.</p>
+      <div class="map-grid">${groups.map(g => `<div class="map-group">${g}</div>` + Engine.FIELDS.filter(f => f[2] === g).map(([k, label]) => `
+        <div class="map-row"><span>${map[k] ? '<span class="ok">●</span> ' : '<span class="muted">○</span> '}${label}</span>
+          <select class="sel" data-map="${k}" aria-label="${label}"><option value="">Not available</option>${columns.map(c => `<option${map[k] === c ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></div>`).join("")).join("")}</div>
+      <h3 style="font-size:12px;color:var(--text-3);margin:18px 0 8px">Preview</h3>
+      <div class="tbl-wrap"><table class="preview"><thead><tr>${columns.slice(0, 10).map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.slice(0, 4).map(r => `<tr>${columns.slice(0, 10).map(c => `<td>${esc(String(r[c]).slice(0, 24))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+    </div>
+    <div class="dr-f" style="justify-content:space-between;border-radius:0 0 12px 12px"><button class="btn btn-ghost" id="mapCancel" type="button">Cancel</button>
+      <button class="btn" id="scoreBtn" type="button" ${matched < 5 ? "disabled" : ""}>Score ${NUM(rows.length)} customers</button></div>`;
+  $$("[data-map]").forEach(s => s.onchange = () => { staged.map[s.dataset.map] = s.value || undefined; if (!s.value) delete staged.map[s.dataset.map]; drawMapping(); });
+  $("#mapCancel").onclick = () => { staged = null; el.hidden = true; };
+  $("#scoreBtn").onclick = scoreStaged;
+}
+function scoreStaged() {
+  const b = $("#scoreBtn"); b.disabled = true; b.textContent = "Scoring…";
+  setTimeout(() => {
+    try {
+      const t0 = performance.now();
+      const rows = Engine.score(Engine.normalise(staged.rows, staged.map, MODEL), MODEL);
+      const matched = Engine.FIELDS.filter(([k]) => staged.map[k]).length;
+      DATASETS.mine = Engine.build(rows, { model: DEMO.model, rule_check: DEMO.rule_check },
+        { name: staged.name, source: staged.source, map: staged.map, matched });
+      NOTES.mine = null; CHATS.mine = [];
+      const secs = ((performance.now() - t0) / 1000).toFixed(1);
+      staged = null;
+      refreshDatasetPicker(); setDataset("mine", false);
+      location.hash = "#/"; toast(`Scored ${NUM(rows.length)} customers in ${secs}s — now viewing your data`);
+    } catch (err) { toast("Scoring failed: " + err.message); b.disabled = false; b.textContent = "Score customers"; }
+  }, 30);
+}
+function aData() {
+  const drop = $("#drop"), fi = $("#fileIn");
+  drop.onclick = () => fi.click(); drop.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fi.click(); } };
+  fi.onchange = () => fi.files[0] && ingest("file", fi.files[0]);
+  ["dragover", "dragenter"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", e => e.dataTransfer.files[0] && ingest("file", e.dataTransfer.files[0]));
+  $("#urlForm").onsubmit = e => { e.preventDefault(); ingest("url", $("#urlIn").value.trim()); };
+  $("#sampleBtn").onclick = () => ingest("sample");
+  if (staged) drawMapping();
+}
+
+// ---- datasets
+const DATASETS = {};
+function refreshDatasetPicker() {
+  const sel = $("#datasetSel");
+  sel.innerHTML = `<option value="demo">Lumen Play (sample)</option>` + (DATASETS.mine ? `<option value="mine">${esc(DATASETS.mine.dataset.name)} · ${NUM(DATASETS.mine.kpis.subscribers)}</option>` : "") + `<option value="__add">+ Add data source…</option>`;
+  sel.value = CUR;
+}
+function setDataset(key, reroute = true) {
+  CUR = key; D = DATASETS[key];
+  NOTE = NOTES[key] ? NOTES[key].note : null; FACTS = NOTES[key] ? NOTES[key].facts : [];
+  cf = { q: "", band: "", group: "", plan: "", status: "", page: 0 };
+  $("#navCount").textContent = D.watchlist.length;
+  $("#fresh").textContent = D.dataset && D.dataset.own ? `${D.dataset.source} · scored just now` : `Scored ${today}`;
+  $("#datasetSel").value = key;
+  renderChat();
+  if (reroute) route();
+}
+$("#datasetSel").onchange = e => { if (e.target.value === "__add") { e.target.value = CUR; location.hash = "#/data"; } else setDataset(e.target.value); };
+
+// ---- plans
+function pPricing() {
+  const plan = (name, price, per, desc, feats, cta, href, featured = false, tag = "") => `<div class="plan ${featured ? "featured" : ""}">
+    <div class="plan-name"><span>${name}</span>${tag ? `<span class="pill neutral plain">${tag}</span>` : ""}</div>
+    <div class="price">${price}${per ? ` <small>${per}</small>` : ""}</div><p>${desc}</p>
+    <ul>${feats.map(f => (f.startsWith("~") ? `<li class="soon">${f.slice(1)}</li>` : `<li>${f}</li>`)).join("")}</ul>
+    <a class="btn ${featured ? "" : "btn-secondary"}" href="${href}">${cta}</a></div>`;
+  return `<div class="ph"><div><h1>Plans &amp; billing</h1><p>Start free with a file export. Upgrade when Churn Radar becomes part of your weekly retention routine.</p></div>
+    <div class="ph-actions"><span class="pill blue plain">Current plan: Starter</span></div></div>
+  <div class="plans">
+    ${plan("Starter", "Free", "", "For trying Churn Radar on a sample or a one-off export.", ["Up to 5,000 customers per upload", "CSV and Excel upload", "Risk scores, reasons and segments", "At-risk list with CSV export", "10 AI questions a day"], "Use your data", "#/data")}
+    ${plan("Growth", "PKR 45,000", "/ month", "For retention teams running weekly campaigns.", ["Up to 250,000 customers", "Google Sheets and CSV links", "Weekly AI briefing, verified twice", "AI assistant (fair use)", "Campaign planner and reports", "5 team seats"], "Try it with your data", "#/data", true, "Most popular")}
+    ${plan("Enterprise", "Custom", "", "For operators with strict data-residency and security needs.", ["Unlimited customers", "Hosting in Pakistan (in-country compute)", "Model retrained on your own outcomes", "SSO and audit log", "~Direct SQL Server, PostgreSQL and Snowflake connectors", "~Uplift modelling from your campaigns"], "Contact sales", "#/pricing")}
+  </div>
+  <p class="muted" style="font-size:12.5px;margin-top:14px">Illustrative pricing for this prototype; no payment details are collected. ○ marks features on the roadmap.</p>`;
+}
+function aPricing() { $$('.plan a[href="#/pricing"]').forEach(a => a.onclick = e => { e.preventDefault(); toast("Sales enquiries open after the pilot — use Starter with your own data meanwhile"); }); }
+
+// ---- AI assistant
+const CHATS = { demo: [] };
+const SUGGEST = ["What is driving churn right now?", "Which customer group should we focus on first?", "How much revenue is at risk, and where?", "Would a 15% offer to the top 10% pay off?"];
+function chatFacts() {
+  const f = Engine.facts(D), b = base();
+  f.push({ key: "campaign", text: `A 15% one-month offer to the top 10% by score, assuming 30% of likely leavers are kept and 50% of those who stay use the offer, costs about PKR ${NUM(b.cost)} and protects about PKR ${NUM(b.protectedRev)} a month: a net PKR ${NUM(b.net)}. The same offer sent to random customers would net PKR ${NUM(b.rNet)}.` });
+  return f;
+}
+function renderAnswer(m) {
+  const v = m.verification, s = v.sentences; let i = 0;
+  const html = m.answer.split(SPLIT).filter(Boolean).map(x => sentence(x, s[i++])).join(" ");
+  const flagged = v.flagged_final ?? v.flagged;
+  const cited = [...new Set(s.flatMap(x => x.cited))].map(id => m.facts.find(f => f.id === id)).filter(Boolean);
+  return `<div class="msg bot"><div class="bubble">${html}</div>
+    <div class="msg-meta">${flagged ? `<span class="pill no">${flagged} statement${flagged > 1 ? "s" : ""} couldn't be verified</span>` : `<span class="pill ok">Checked against your figures</span>`}<span>$${m.meta.total_cost_usd.toFixed(4)}</span></div>
+    ${cited.length ? `<details><summary>Sources (${cited.length})</summary><ol>${cited.map(f => `<li value="${f.id.slice(1)}">${esc(f.text)}</li>`).join("")}</ol></details>` : ""}
+    ${m.followups && m.followups.length ? `<div class="chips" style="margin-top:8px">${m.followups.map(q => `<button class="chip" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>` : ""}</div>`;
+}
+function renderChat() {
+  const log = $("#chatLog"); if (!log || !D) return;
+  CHATS[CUR] ||= [];
+  $("#chatScope").textContent = "Dataset: " + (D.dataset && D.dataset.own ? D.dataset.name : "Lumen Play (sample)");
+  log.innerHTML = (CHATS[CUR].length ? "" : `<div class="msg bot"><div class="bubble">Ask me about churn in the active dataset. I only see aggregate figures, and every number I give is checked against them.</div>
+    <div class="chips" style="margin-top:8px">${SUGGEST.map(q => `<button class="chip" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div></div>`) +
+    CHATS[CUR].map(m => m.role === "user" ? `<div class="msg user">${esc(m.content)}</div>` : m.error ? `<div class="msg bot"><div class="bubble">${esc(m.error)}</div></div>` : renderAnswer(m)).join("");
+  $$("#chatLog [data-q]").forEach(c => c.onclick = () => ask(c.dataset.q));
+  log.scrollTop = log.scrollHeight;
+}
+async function ask(q) {
+  q = q.trim(); if (!q) return;
+  const hist = CHATS[CUR];
+  hist.push({ role: "user", content: q }); renderChat();
+  $("#chatLog").insertAdjacentHTML("beforeend", `<div class="msg bot" id="typing"><span class="typing"><i></i><i></i><i></i></span></div>`); $("#chatLog").scrollTop = 1e9;
+  try {
+    const history = hist.slice(0, -1).filter(m => !m.error).slice(-6).map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.role === "user" ? m.content : m.answer }));
+    const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, facts: chatFacts(), history }) });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
+    hist.push({ role: "bot", ...j });
+  } catch (err) { hist.push({ role: "bot", error: "Sorry — " + err.message }); }
+  renderChat();
+}
+const chat = $("#chat");
+$("#askBtn").onclick = () => { chat.hidden = !chat.hidden; if (!chat.hidden) { renderChat(); $("#chatInput").focus(); } };
+$("#chatClose").onclick = () => { chat.hidden = true; $("#askBtn").focus(); };
+$("#chatForm").onsubmit = e => { e.preventDefault(); const t = $("#chatInput"); const q = t.value; t.value = ""; ask(q); };
+$("#chatInput").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chatForm").requestSubmit(); } };
+
 // ---------------------------------------------------------------- router
 const ROUTES = {
   "": ["overview", "Overview", pOverview, aOverview], briefing: ["briefing", "Weekly briefing", pBriefing, aBriefing],
   customers: ["customers", "At-risk customers", pCustomers, aCustomers], segments: ["segments", "Segments", pSegments, aSegments],
   campaigns: ["campaigns", "Campaign planner", pCampaigns, aCampaigns], model: ["model", "Model health", pModel, aModel],
+  data: ["data", "Data sources", pData, aData], pricing: ["pricing", "Plans & billing", pPricing, aPricing],
 };
 function updateCrumbs(key, extra) {
   const r = Object.values(ROUTES).find(x => x[0] === key);
   $("#crumbs").innerHTML = key.startsWith("reports/") ? `<span>Reports</span><span>/</span><b>${REPORTS[key.split("/")[1]].name}</b>`
-    : extra ? `<a href="#/${key}">${r[1]}</a><span>/</span><b>${extra}</b>` : `<span>Lumen Play</span><span>/</span><b>${r ? r[1] : ""}</b>`;
+    : extra ? `<a href="#/${key}">${r[1]}</a><span>/</span><b>${extra}</b>` : `<span>${D && D.dataset && D.dataset.own ? esc(D.dataset.name) : "Lumen Play"}</span><span>/</span><b>${r ? r[1] : ""}</b>`;
 }
 function route() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
@@ -544,9 +761,9 @@ window.addEventListener("hashchange", route);
 
 Promise.all(["data/dashboard.json", "data/weekly_note.json", "data/facts.json"].map(u => fetch(u).then(r => r.json())))
   .then(([d, n, f]) => {
-    D = d; NOTE = n; FACTS = f.facts;
-    $("#navCount").textContent = D.watchlist.length;
-    $("#fresh").textContent = `Scored ${today}`;
+    DEMO = DATASETS.demo = d; DEMO_NOTE = n; NOTES.demo = { note: n, facts: f.facts };
+    refreshDatasetPicker(); setDataset("demo", false);
     route();
+    fetch("model/churn_model.json").then(r => r.json()).then(m => (MODEL = m));
   })
   .catch(e => { page().innerHTML = `<div class="panel panel-b">Couldn't load the workspace: ${esc(e.message)}</div>`; });

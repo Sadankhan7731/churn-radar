@@ -156,8 +156,10 @@ NUM = re.compile(r"\d[\d,]*\.?\d*")
 PRIVATE = re.compile(r"SUB\d{4,}|\b03\d{9}\b|\+92\d{10}")   # subscriber IDs or Pakistani phone numbers
 
 
-def verify_note(note, facts):
-    """Check every sentence. Returns per-sentence results and the unsupported-claim rate."""
+def verify_note(note, facts, allow_plain=False):
+    """Check every sentence. Returns per-sentence results and the unsupported-claim rate.
+    allow_plain=True (used by the chat): a sentence with no numbers and no citation, such as
+    "I can't see that in the data", is allowed; the judge still checks its meaning."""
     by_id = {f["id"]: f for f in facts}
     sentences = []
     for part in note.get("paragraphs", []) + note.get("actions", []):
@@ -170,6 +172,9 @@ def verify_note(note, facts):
         for a, b in re.findall(r"F(\d+)\s*[-\u2013\u2011]\s*F(\d+)", cites):   # ranges like F10-F12
             cited += [f"F{i}" for i in range(int(a), int(b) + 1)]
         problems = []
+        if not cited and allow_plain and not NUM.findall(re.sub(r"\[[^\]]*\]", "", s)):
+            checked.append({"sentence": s, "cited": [], "ok": True, "problems": []})
+            continue
         if not cited:
             # Targeted feedback: work out which facts these numbers came from, so the
             # repair step can tell the writer exactly which ids to add.
@@ -266,9 +271,10 @@ def make_traps(facts):
     ]}
 
 
-def run_pipeline(dashboard, api_key):
-    """Everything the website's 'Regenerate' button does: write, check numbers, judge."""
-    facts = build_facts(dashboard)
+def run_pipeline(dashboard, api_key, facts=None):
+    """Everything the website's 'Regenerate' button does: write, check numbers, judge.
+    `facts` lets the browser supply aggregate facts for a customer's own uploaded data."""
+    facts = facts or build_facts(dashboard)
     assert not PRIVATE.search(json.dumps(facts)), "privacy check failed"
     if not api_key:
         note = demo_note(facts)
@@ -298,3 +304,53 @@ def run_pipeline(dashboard, api_key):
     note["attempts"] = attempts
     note["meta"]["total_cost_usd"] = round(spent, 6)
     return note, facts
+
+
+# ---------------------------------------------------------------------------
+# Chat: answer a question from the same kind of numbered facts
+# ---------------------------------------------------------------------------
+CHAT_SYSTEM = """You are Churn Radar, an assistant for the leadership of a subscription streaming company.
+Answer the user's question using ONLY the numbered facts provided.
+Rules:
+- 1 to 4 short sentences, plain English for executives, currency PKR.
+- End every sentence that states a number or a finding with the fact ids it relies on, like [F3] or [F2, F9].
+- Keep every label exactly as written in the facts. Never invent numbers, causes, segments or trends.
+- If the facts do not answer the question, say so in one sentence without a citation, and say what data would be needed.
+- Never give individual customer details; you only see totals.
+Return JSON: {"answer": str, "followups": [three short follow-up questions the facts can answer]}"""
+
+
+def clean_facts(raw):
+    """Facts arrive from the browser, so never trust them: rebuild numbers here, cap sizes, block identifiers."""
+    facts = []
+    for i, f in enumerate((raw or [])[:40]):
+        text = str(f.get("text", ""))[:400]
+        if PRIVATE.search(text):
+            raise ValueError("facts must not contain customer IDs or phone numbers")
+        nums = [float(x.replace(",", "").rstrip(".")) for x in NUM.findall(text)]
+        facts.append({"id": f"F{i + 1}", "key": str(f.get("key", ""))[:40], "text": text, "numbers": nums})
+    if not facts:
+        raise ValueError("no facts provided")
+    return facts
+
+
+def answer_question(facts, question, history, api_key):
+    question = str(question)[:500]
+    if PRIVATE.search(question):
+        raise ValueError("please don't include customer IDs or phone numbers in questions")
+    msgs = [{"role": "system", "content": CHAT_SYSTEM},
+            {"role": "user", "content": f"FACTS:\n{facts_block(facts)}"}]
+    for h in (history or [])[-6:]:
+        if h.get("role") in ("user", "assistant"):
+            msgs.append({"role": h["role"], "content": str(h.get("content", ""))[:800]})
+    msgs.append({"role": "user", "content": question})
+    out, meta = _chat(msgs, api_key, MODEL, temperature=0.2, max_tokens=700)
+    answer = str(out.get("answer", "")).strip()
+    v = verify_note({"paragraphs": [answer], "actions": []}, facts, allow_plain=True)
+    try:
+        v = judge_note(v, facts, api_key)
+    except Exception as e:
+        v["judge_error"] = str(e)[:200]
+    cost = meta["cost_usd"] + v.get("judge_meta", {}).get("cost_usd", 0)
+    return {"answer": answer, "followups": [str(x)[:120] for x in out.get("followups", [])][:3],
+            "verification": v, "meta": {**meta, "total_cost_usd": round(cost, 6)}}

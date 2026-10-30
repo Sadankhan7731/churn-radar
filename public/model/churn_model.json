@@ -1,0 +1,273 @@
+{
+ "name": "Churn Radar v2 (logistic regression)",
+ "intercept": -1.0896074437211165,
+ "numeric": [
+  {
+   "name": "tenure_days",
+   "mean": 241.20568571428572,
+   "scale": 169.19439616425524,
+   "weight": -0.1914457525026985
+  },
+  {
+   "name": "watch_min_last_7d",
+   "mean": 307.51417142857144,
+   "scale": 235.92749848635228,
+   "weight": 0.0044476457902438565
+  },
+  {
+   "name": "watch_change_pct",
+   "mean": -0.06219142857142859,
+   "scale": 26.143077957336146,
+   "weight": -0.45438864822791625
+  },
+  {
+   "name": "watch_trend_8w_pct",
+   "mean": 0.04955428571428572,
+   "scale": 17.92911492759899,
+   "weight": -0.24888535795280142
+  },
+  {
+   "name": "sessions_7d",
+   "mean": 7.325242857142857,
+   "scale": 5.897791591376056,
+   "weight": 0.014339324159585732
+  },
+  {
+   "name": "days_since_active",
+   "mean": 2.5198428571428573,
+   "scale": 2.989391811703102,
+   "weight": 0.2586561177989222
+  },
+  {
+   "name": "completion_rate",
+   "mean": 0.571605,
+   "scale": 0.17554995944378424,
+   "weight": -0.24300482824740408
+  },
+  {
+   "name": "distinct_titles_30d",
+   "mean": 6.9898,
+   "scale": 2.648252030518028,
+   "weight": -0.03994433600686803
+  },
+  {
+   "name": "category_concentration",
+   "mean": 0.6669615714285714,
+   "scale": 0.1614114908560966,
+   "weight": 0.14377075903033734
+  },
+  {
+   "name": "live_share",
+   "mean": 0.4301167142857143,
+   "scale": 0.30770022392963403,
+   "weight": 0.166905128038393
+  },
+  {
+   "name": "binge_sessions_30d",
+   "mean": 1.3837428571428572,
+   "scale": 1.3511365552824068,
+   "weight": 0.0035930446429800252
+  },
+  {
+   "name": "fav_content_ended",
+   "mean": 0.5338,
+   "scale": 0.4988562518401468,
+   "weight": 0.47149491660042603
+  },
+  {
+   "name": "days_to_next_release",
+   "mean": 13.2908,
+   "scale": 10.059993237146266,
+   "weight": 0.24367138307060202
+  },
+  {
+   "name": "catalogue_match_titles",
+   "mean": 33.10292857142857,
+   "scale": 12.813382178489832,
+   "weight": -0.1746768559921326
+  },
+  {
+   "name": "recs_ignored_30d",
+   "mean": 3.9929571428571426,
+   "scale": 1.9956507276411604,
+   "weight": 0.08848675011804964
+  },
+  {
+   "name": "failed_renewals_30d",
+   "mean": 0.506,
+   "scale": 0.6601891503847319,
+   "weight": 0.2355412745075191
+  },
+  {
+   "name": "low_balance_renewals_30d",
+   "mean": 0.5586857142857143,
+   "scale": 0.7957109946071976,
+   "weight": 0.2364591866976297
+  },
+  {
+   "name": "recharges_30d",
+   "mean": 2.3908857142857145,
+   "scale": 1.9540601872793488,
+   "weight": 0.007701768627560228
+  },
+  {
+   "name": "payment_switches_90d",
+   "mean": 0.1505142857142857,
+   "scale": 0.38859052053937343,
+   "weight": 0.09673853311473196
+  },
+  {
+   "name": "buffering_errors_7d",
+   "mean": 1.4825142857142857,
+   "scale": 1.5239075594654417,
+   "weight": 0.09625049325702618
+  },
+  {
+   "name": "app_crashes_7d",
+   "mean": 0.41901428571428573,
+   "scale": 0.657863337802381,
+   "weight": 0.07685692297589447
+  },
+  {
+   "name": "video_start_sec",
+   "mean": 2.26875,
+   "scale": 1.5662900234311652,
+   "weight": 0.1250028925704878
+  },
+  {
+   "name": "login_failures_30d",
+   "mean": 0.19847142857142858,
+   "scale": 0.4453190901374163,
+   "weight": 0.03961840133384017
+  },
+  {
+   "name": "plan_downgrades_90d",
+   "mean": 0.07038571428571429,
+   "scale": 0.25579594506208286,
+   "weight": 0.13562753645981368
+  },
+  {
+   "name": "past_cancellations",
+   "mean": 0.28932857142857143,
+   "scale": 0.5509890904138685,
+   "weight": 0.1352715838192181
+  },
+  {
+   "name": "offers_received_90d",
+   "mean": 2.5045714285714284,
+   "scale": 1.588029044097733,
+   "weight": 0.03220319037496658
+  },
+  {
+   "name": "offer_open_rate",
+   "mean": 0.3670481428571428,
+   "scale": 0.3741155275686638,
+   "weight": -0.04365203280178475
+  },
+  {
+   "name": "used_discount",
+   "mean": 0.17798571428571427,
+   "scale": 0.3825007186867998,
+   "weight": 0.11965964998396163
+  },
+  {
+   "name": "support_tickets_30d",
+   "mean": 0.4511,
+   "scale": 0.6821040484098763,
+   "weight": -0.017971613263091157
+  },
+  {
+   "name": "ticket_negative",
+   "mean": 0.16152857142857144,
+   "scale": 0.36801778766904236,
+   "weight": 0.2050706889534663
+  },
+  {
+   "name": "ticket_resolved",
+   "mean": 0.8749285714285714,
+   "scale": 0.33079988864346765,
+   "weight": -0.1252254105760118
+  },
+  {
+   "name": "monthly_revenue_pkr",
+   "mean": 292.91214285714284,
+   "scale": 70.70046066515624,
+   "weight": -0.04076392422761347
+  }
+ ],
+ "categorical": [
+  {
+   "name": "payment_channel",
+   "weights": {
+    "Card": -0.06558321355180466,
+    "Operator 1": -0.18625722327606659,
+    "Operator 2": -0.21303296138485917,
+    "Operator 3": -0.21346889875274047,
+    "Operator 4": -0.21604439578800966,
+    "Wallet": -0.18838560218028677
+   }
+  },
+  {
+   "name": "plan",
+   "weights": {
+    "Daily": -0.0772971415649896,
+    "Monthly": -0.36175834439319904,
+    "Sports Premium": -0.24723056492796414,
+    "Weekly": -0.39648624404762206
+   }
+  },
+  {
+   "name": "city",
+   "weights": {
+    "Faisalabad": -0.21828187255487871,
+    "Islamabad": -0.11368811806069683,
+    "Karachi": -0.20528964459516671,
+    "Lahore": -0.20895217952616968,
+    "Other": -0.17607260688647372,
+    "Peshawar": -0.1604878733103821
+   }
+  },
+  {
+   "name": "device",
+   "weights": {
+    "Android": -0.23286322106893428,
+    "Smart TV": -0.29226910824162317,
+    "Web": -0.2692296048721656,
+    "iOS": -0.2884103607507403
+   }
+  },
+  {
+   "name": "network",
+   "weights": {
+    "3G": -0.32869597182978444,
+    "4G": -0.4011933308335808,
+    "WiFi": -0.3528829922700694
+   }
+  },
+  {
+   "name": "signup_source",
+   "weights": {
+    "Operator bundle": 0.02464760416270902,
+    "Organic": -0.18507872530877884,
+    "Referral": -0.5309116440178036,
+    "Social ad": -0.23032159741121577,
+    "TV promo": -0.1611079323586831
+   }
+  },
+  {
+   "name": "favourite_genre",
+   "weights": {
+    "Drama": -0.2835568541587318,
+    "Kids": -0.16200172563353718,
+    "Movies": -0.15485813488606032,
+    "News": -0.17835366568209635,
+    "Sports": -0.30400191457324144
+   }
+  }
+ ],
+ "derived": {
+  "watch_change_pct": "(watch_min_last_7d - watch_min_prev_7d) / (watch_min_prev_7d + 30) * 100",
+  "offer_open_rate": "offers_opened_90d / max(offers_received_90d, 1)",
+  "ticket_negative": "ticket_sentiment == 'negative'"
+ }
+}

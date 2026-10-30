@@ -15,14 +15,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "api"))
 os.chdir(ROOT)                                   # so load_key() finds .env
 from weekly_note import generate                # noqa: E402
+from chat import handle as chat_handle          # noqa: E402
 
 PORT = int(os.environ.get("PORT", 8000))
 
 
 class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
-        if self.path.startswith("/api/weekly_note"):
-            status, body = generate()
+        n = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(n) if n else b""
+        if self.path.startswith("/api/weekly_note") or self.path.startswith("/api/chat"):
+            status, body = generate(raw) if self.path.startswith("/api/weekly_note") else chat_handle(raw)
             data = json.dumps(body).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")

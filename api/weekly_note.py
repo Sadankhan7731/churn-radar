@@ -12,20 +12,21 @@ import time
 from http.server import BaseHTTPRequestHandler
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _note_engine import load_key, run_pipeline   # noqa: E402
+from _note_engine import clean_facts, load_key, run_pipeline   # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _last_call = [0.0]
 MIN_SECONDS_BETWEEN_CALLS = 10   # simple guard so nobody can burn the API key by clicking fast
 
 
-def generate():
+def generate(body=b""):
     if time.time() - _last_call[0] < MIN_SECONDS_BETWEEN_CALLS:
         return 429, {"error": "Please wait a few seconds before regenerating again."}
     _last_call[0] = time.time()
     dashboard = json.load(open(os.path.join(ROOT, "public", "data", "dashboard.json")))
     try:
-        note, facts = run_pipeline(dashboard, load_key())
+        sent = json.loads(body or b"{}").get("facts") if body else None
+        note, facts = run_pipeline(dashboard, load_key(), clean_facts(sent) if sent else None)
         return 200, {"note": note, "facts": facts}
     except Exception as e:
         return 502, {"error": str(e)[:300]}
@@ -42,7 +43,8 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
-        self._send(*generate())
+        n = int(self.headers.get("Content-Length") or 0)
+        self._send(*generate(self.rfile.read(n) if 0 < n <= 200_000 else b""))
 
     def do_GET(self):
         self._send(*generate())

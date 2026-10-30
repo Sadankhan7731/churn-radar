@@ -16,6 +16,15 @@ Built for **KSBL DATA722 – Generative AI & Strategic Forecasting, Phase 2**. T
 
 The model **recommends**; a person decides who gets an offer. Nothing is sent to subscribers.
 
+## Bring your own data (SaaS mode)
+
+Churn Radar also works on other companies' data, without breaking the Phase 1 data rule:
+
+* **Data sources:** upload CSV or Excel, paste a Google Sheets/CSV link, load the sample, or export from SQL Server with the provided query (`public/samples/sqlserver_query.sql`). Columns are matched to the 40 signals automatically and can be corrected.
+* **Scored in the browser:** Step 6 exports the logistic-regression formula to `public/model/churn_model.json`; `public/engine.js` scores every customer on the user's device (verified to match Python to 6 decimals). Customer rows are never uploaded.
+* **Ask Churn Radar:** an AI assistant (`api/chat.py`) answers questions from aggregate facts only; every answer goes through the same number check and AI judge as the weekly briefing.
+* **Plans:** illustrative Starter / Growth / Enterprise tiers. Direct database connectors are on the Enterprise roadmap because a public website should never hold database credentials.
+
 ## Results (held-out test set, 30,000 subscribers)
 
 | Metric | Phase 1 target | Result |
@@ -37,6 +46,9 @@ src/step4_explain_and_segment.py reason codes, personas, content view, segments,
 src/step5_weekly_note.py         AI note, number check, AI judge, trap test
 src/serve.py                     run the dashboard locally
 src/build_notebook.py            builds Churn_Radar_Notebook.ipynb (the working record)
+src/step6_export_for_browser.py  exports the model formula and sample files for in-browser scoring
+api/chat.py                      Vercel function behind the AI assistant
+public/engine.js                 in-browser parsing, column mapping, scoring and summaries
 api/_note_engine.py              shared note engine (local + live site)
 api/weekly_note.py               Vercel function behind "Regenerate live"
 public/                          the dashboard (HTML, CSS, JS, data)
@@ -52,6 +64,7 @@ cp .env.example .env            # then paste your Groq key into .env
 .venv/bin/python src/step2_train_and_evaluate.py
 .venv/bin/python src/step4_explain_and_segment.py
 .venv/bin/python src/step5_weekly_note.py
+.venv/bin/python src/step6_export_for_browser.py
 .venv/bin/python src/serve.py   # open http://localhost:8000
 ```
 
