@@ -33,17 +33,31 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-df = pd.read_csv("data/subscribers.csv")
+df = pd.read_csv("data/subscribers.csv.gz")
 
 # --- Feature engineering: turn raw columns into clearer signals --------------
 df["watch_change_pct"] = ((df.watch_min_last_7d - df.watch_min_prev_7d)
                           / (df.watch_min_prev_7d + 30) * 100).round(1)
+df["offer_open_rate"] = (df.offers_opened_90d / df.offers_received_90d.clip(lower=1)).round(2)
+df["ticket_negative"] = (df.ticket_sentiment == "negative").astype(int)
 
-NUMERIC = ["tenure_days", "watch_min_last_7d", "watch_change_pct", "sessions_7d",
-           "days_since_active", "failed_renewals_30d", "support_tickets_30d",
-           "buffering_errors_7d", "used_discount", "sports_season_over",
-           "monthly_revenue_pkr"]
-CATEGORICAL = ["payment_channel", "plan", "city", "device", "favourite_genre"]
+NUMERIC = [
+    # viewing
+    "tenure_days", "watch_min_last_7d", "watch_change_pct", "watch_trend_8w_pct", "sessions_7d",
+    "days_since_active", "completion_rate", "distinct_titles_30d", "category_concentration",
+    "live_share", "binge_sessions_30d",
+    # content
+    "fav_content_ended", "days_to_next_release", "catalogue_match_titles", "recs_ignored_30d",
+    # payment
+    "failed_renewals_30d", "low_balance_renewals_30d", "recharges_30d", "payment_switches_90d",
+    # experience
+    "buffering_errors_7d", "app_crashes_7d", "video_start_sec", "login_failures_30d",
+    # plan history, marketing, support
+    "plan_downgrades_90d", "past_cancellations", "offers_received_90d", "offer_open_rate",
+    "used_discount", "support_tickets_30d", "ticket_negative", "ticket_resolved",
+    "monthly_revenue_pkr",
+]
+CATEGORICAL = ["payment_channel", "plan", "city", "device", "network", "signup_source", "favourite_genre"]
 TARGET = "churned_next_30d"
 
 X, y = df[NUMERIC + CATEGORICAL], df[TARGET]
@@ -60,7 +74,7 @@ models = {
         ("prep", prep), ("model", LogisticRegression(max_iter=2000))]),
     "Gradient boosting": Pipeline([
         ("prep", prep), ("model", HistGradientBoostingClassifier(
-            max_iter=300, learning_rate=0.05, max_leaf_nodes=15, random_state=42))]),
+            max_iter=400, learning_rate=0.05, max_leaf_nodes=20, random_state=42))]),
 }
 
 
@@ -122,7 +136,7 @@ checks = {
 }
 # --- The ceiling: how good could a PERFECT model be on this data? ----------
 # Score the same test set with the true probabilities from Step 1.
-truth = pd.read_csv("data/true_probability.csv").set_index("subscriber_id").true_probability
+truth = pd.read_csv("data/true_probability.csv.gz").set_index("subscriber_id").true_probability
 ceiling = evaluate(y_test, truth.loc[df.loc[X_test.index, "subscriber_id"]].values)
 ceiling = {k: ceiling[k] for k in ["auc", "precision_top10", "recall_top10", "lift_top10", "brier"]}
 print(f"\nPerfect-model ceiling on the same test set: AUC {ceiling['auc']}, "
@@ -150,10 +164,10 @@ fig.savefig("outputs/calibration.png", dpi=150)
 # --- Save everything the next steps and the dashboard need -------------------
 joblib.dump(final, "outputs/churn_model.joblib")
 df["churn_score"] = final.predict_proba(df[NUMERIC + CATEGORICAL])[:, 1].round(4)
-df.to_csv("outputs/scored_subscribers.csv", index=False)
+df.to_csv("outputs/scored_subscribers.csv.gz", index=False)
 json.dump({"chosen_model": chosen, "results": results,
            "targets": {k: bool(v) for k, v in checks.items()}, "ceiling": ceiling,
            "features": {"numeric": NUMERIC, "categorical": CATEGORICAL}},
           open("outputs/model_metrics.json", "w"), indent=2)
-print("\nSaved: outputs/churn_model.joblib, outputs/scored_subscribers.csv, "
+print("\nSaved: outputs/churn_model.joblib, outputs/scored_subscribers.csv.gz, "
       "outputs/model_metrics.json, outputs/calibration.png")

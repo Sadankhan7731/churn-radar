@@ -2,125 +2,161 @@
  "facts": [
   {
    "id": "F1",
-   "text": "20,000 paying subscribers were scored this week.",
+   "key": "base",
+   "text": "100,000 paying subscribers were scored this week.",
    "numbers": [
-    20000.0,
-    20000
+    100000.0
    ]
   },
   {
    "id": "F2",
-   "text": "About 1,835 subscribers are expected to cancel in the next 30 days (9% of the base).",
+   "key": "expected",
+   "text": "About 9,076 subscribers are expected to cancel in the next 30 days (9% of the base).",
    "numbers": [
-    1835.0,
+    9076.0,
     30.0,
-    9.0,
-    1835,
-    9
+    9.0
    ]
   },
   {
    "id": "F3",
-   "text": "Total monthly revenue at risk is PKR 547,507.",
+   "key": "revenue",
+   "text": "Total monthly revenue at risk is PKR 2,764,263.",
    "numbers": [
-    547507.0,
-    547507
+    2764263.0
    ]
   },
   {
    "id": "F4",
-   "text": "The high-risk group is the top 2,000 subscribers (top 10%), with PKR 187,604 of revenue at risk.",
+   "key": "high_risk",
+   "text": "The high-risk group is the top 10,000 subscribers (top 10%), with PKR 1,012,831 of revenue at risk.",
    "numbers": [
-    2000.0,
+    10000.0,
     10.0,
-    187604.0,
-    2000,
-    10,
-    187604
+    1012831.0
    ]
   },
   {
    "id": "F5",
-   "text": "'Watching much less than last week' is a top reason for 61% of the high-risk group.",
+   "key": "reason1",
+   "text": "'Followed title just ended' (content) is a top reason for 76% of the high-risk group.",
    "numbers": [
-    61.0,
-    61
+    76.0
    ]
   },
   {
    "id": "F6",
-   "text": "'Failed renewals' is a top reason for 54% of the high-risk group.",
+   "key": "reason2",
+   "text": "'Watching much less than last week' (viewing) is a top reason for 42% of the high-risk group.",
    "numbers": [
-    54.0,
-    54
+    42.0
    ]
   },
   {
    "id": "F7",
-   "text": "'On a Daily pack' is a top reason for 41% of the high-risk group.",
+   "key": "reason3",
+   "text": "'Negative support ticket' (support) is a top reason for 34% of the high-risk group.",
    "numbers": [
-    41.0,
-    41
+    34.0
    ]
   },
   {
    "id": "F8",
-   "text": "'Sports series ended' is a top reason for 39% of the high-risk group.",
+   "key": "reason4",
+   "text": "'Failed renewals' (payment) is a top reason for 24% of the high-risk group.",
    "numbers": [
-    39.0,
-    39
+    24.0
    ]
   },
   {
    "id": "F9",
-   "text": "'Inactive 5+ days' is a top reason for 39% of the high-risk group.",
+   "key": "reason5",
+   "text": "'Low balance at renewal' (payment) is a top reason for 23% of the high-risk group.",
    "numbers": [
-    5.0,
-    39.0,
-    39
+    23.0
    ]
   },
   {
    "id": "F10",
-   "text": "The riskiest plan is Daily: average churn risk 12%, PKR 206,377 at risk.",
+   "key": "content1",
+   "text": "Sports: 29,505 fans followed 'T20 International Series', which ended 3 days ago; the next release, 'National Cup', arrives in 24 days. 6,644 of these fans are high-risk.",
    "numbers": [
-    12.0,
-    206377.0,
-    12,
-    206377
+    29505.0,
+    20.0,
+    3.0,
+    24.0,
+    6644.0
    ]
   },
   {
    "id": "F11",
-   "text": "The riskiest payment channel is Operator 4: average churn risk 10%, PKR 62,465 at risk.",
+   "key": "content2",
+   "text": "Drama: 14,121 fans followed 'Season finale of a prime-time serial', which ended 6 days ago; the next release, 'New prime-time serial', arrives in 5 days. 986 of these fans are high-risk.",
    "numbers": [
-    4.0,
-    10.0,
-    62465.0,
-    10,
-    62465
+    14121.0,
+    6.0,
+    5.0,
+    986.0
    ]
   },
   {
    "id": "F12",
-   "text": "The riskiest genre is Sports: average churn risk 10%, PKR 287,883 at risk.",
+   "key": "content3",
+   "text": "Kids: 3,025 fans followed 'Animated series season', which ended 12 days ago; the next release, 'New animated season', arrives in 18 days. 625 of these fans are high-risk.",
    "numbers": [
-    10.0,
-    287883.0,
-    10,
-    287883
+    3025.0,
+    12.0,
+    18.0,
+    625.0
    ]
   },
   {
    "id": "F13",
-   "text": "If the team contacts the top 10% by score, about 28% of them are real leavers, 3.01 times better than contacting people at random.",
+   "key": "persona1",
+   "text": "The 'Payment-troubled' group (want to stay but billing keeps failing) has 28,466 subscribers, 5,794 of them high-risk, with PKR 1,179,439 of monthly revenue at risk.",
+   "numbers": [
+    28466.0,
+    5794.0,
+    1179439.0
+   ]
+  },
+  {
+   "id": "F14",
+   "key": "persona2",
+   "text": "The 'Frustrated by quality' group (buffering, crashes, slow starts or an angry ticket) has 22,223 subscribers, 2,435 of them high-risk, with PKR 662,465 of monthly revenue at risk.",
+   "numbers": [
+    22223.0,
+    2435.0,
+    662465.0
+   ]
+  },
+  {
+   "id": "F15",
+   "key": "riskiest_plan",
+   "text": "The riskiest plan is Sports Premium: average churn risk 12%, PKR 824,338 at risk.",
+   "numbers": [
+    12.0,
+    824338.0
+   ]
+  },
+  {
+   "id": "F16",
+   "key": "riskiest_payment_channel",
+   "text": "The riskiest payment channel is Operator 1: average churn risk 10%, PKR 887,853 at risk.",
+   "numbers": [
+    1.0,
+    10.0,
+    887853.0
+   ]
+  },
+  {
+   "id": "F17",
+   "key": "lift",
+   "text": "If the team contacts the top 10% by score, about 33% of them are real leavers, 3.61 times better than contacting people at random.",
    "numbers": [
     10.0,
-    28.0,
-    3.01,
-    10,
-    28,
-    3.01
+    33.0,
+    3.61
    ]
   }
  ]

@@ -39,6 +39,19 @@
     <section id="overview" class="panel active">
       <div class="section-title"><h2>Executive Summary</h2><p class="lead">Position of the subscriber base for the next 30 days</p></div>
       <div class="kpis" id="kpis"></div>
+      <div>
+        <div class="card">
+          <h2>Content calendar and the fans waiting</h2>
+          <p class="hint">For each genre: the title that just ended, the next release, and how many of its followers are now at high risk.</p>
+          <div class="table-scroll"><table id="contentTable"></table></div>
+          <p class="hint small" id="contentNote"></p>
+        </div>
+        <div class="card">
+          <h2>Customer personas</h2>
+          <p class="hint">Rule-based groups, assigned in order of urgency: problems that can be fixed come first.</p>
+          <div class="table-scroll"><table id="personaTable"></table></div>
+        </div>
+      </div>
       <div class="grid2">
         <div class="card">
           <h2>Principal drivers of churn risk</h2>
@@ -52,8 +65,10 @@
               <option value="plan">Plan</option>
               <option value="payment_channel">Payment channel</option>
               <option value="favourite_genre">Genre</option>
-              <option value="city">City</option>
+              <option value="signup_source">Sign-up source</option>
+              <option value="network">Network</option>
               <option value="device">Device</option>
+              <option value="city">City</option>
             </select>
           </div>
           <p class="hint">Columns: monthly revenue at risk (PKR). Line: average probability of cancellation.</p>
@@ -120,7 +135,7 @@
 
     <!-- PRIORITY CONTACT LIST -->
     <section id="watchlist" class="panel">
-      <div class="section-title"><h2>Priority Contact List</h2><p class="lead">The 500 subscribers with the highest probability of cancelling</p></div>
+      <div class="section-title"><h2>Priority Contact List</h2><p class="lead">The 500 subscribers with the highest probability of cancelling, out of 100,000</p></div>
       <div class="grid-watch">
         <div class="card">
           <div class="card-head">
@@ -129,6 +144,7 @@
               <input id="wSearch" placeholder="Search ID" aria-label="Search subscriber ID">
               <select id="wPlan" aria-label="Plan"><option value="">All plans</option></select>
               <select id="wChannel" aria-label="Channel"><option value="">All channels</option></select>
+              <select id="wPersona" aria-label="Persona"><option value="">All personas</option></select>
             </div>
           </div>
           <p class="hint">Select a subscriber for the explanation. The model recommends; a member of the retention team decides (Phase 1, row 9a).</p>
@@ -165,7 +181,7 @@
 
     <!-- MODEL VALIDATION -->
     <section id="model" class="panel">
-      <div class="section-title"><h2>Model Validation</h2><p class="lead">Held-out test set of 6,000 subscribers, measured against targets fixed in Phase 1</p></div>
+      <div class="section-title"><h2>Model Validation</h2><p class="lead">Held-out test set of 30,000 subscribers, measured against targets fixed in Phase 1</p></div>
       <div class="grid2">
         <div class="card">
           <h2>Model comparison</h2>
@@ -194,9 +210,9 @@
         <div class="card">
           <h2>Process</h2>
           <ol class="flow">
-            <li><b>Score.</b> A logistic regression estimates each subscriber's probability of cancelling within 30 days.</li>
-            <li><b>Explain.</b> Each score is decomposed into its three strongest reasons, each tied to an observed value.</li>
-            <li><b>Aggregate.</b> Totals and shares are reduced to thirteen numbered facts. A privacy control rejects any identifier.</li>
+            <li><b>Score.</b> A logistic regression reads 39 signals per subscriber (viewing, content, payment, experience, plan history, marketing, support, profile) and estimates the probability of cancelling within 30 days.</li>
+            <li><b>Explain.</b> Each score is decomposed into its three strongest reasons, each tied to an observed value. Subscribers are also placed in one of six rule-based personas, and the release calendar shows which fans are waiting for what.</li>
+            <li><b>Aggregate.</b> Totals and shares are reduced to seventeen numbered facts, including the content calendar and personas. A privacy control rejects any identifier.</li>
             <li><b>Draft.</b> <code>gpt-oss-120b</code> on Groq drafts the memorandum and must cite a fact in every sentence.</li>
             <li><b>Verify numbers.</b> Code confirms each citation exists and each figure appears in the cited fact.</li>
             <li><b>Review meaning.</b> An independent model, <code>qwen3.8-27b</code>, judges whether each sentence is faithful to its facts.</li>
@@ -207,10 +223,11 @@
         <div class="card">
           <h2>Known limitations</h2>
           <ol class="flow">
-            <li>Two of the three Phase 1 model targets were missed. Even a perfect model could not reach 40% top-decile precision on this data.</li>
-            <li>The data is synthetic. Real behaviour is less tidy; the model must be re-validated on real data inside the company before any use.</li>
-            <li>The semantic reviewer is itself a language model and can err. The numerical check is strict but cannot judge meaning.</li>
-            <li>Groq processes requests outside Pakistan. This is acceptable only because aggregated, non-identifying facts are sent.</li>
+            <li>One of the three Phase 1 model targets was missed: top-decile precision is 32.8% against 40%. Even a perfect model reaches only 38.2% on this data, so the target was set too high. AUC (0.772) and calibration were met.</li>
+            <li>The data is synthetic, including the content calendar. The effects of each signal were assumed, not measured; the model must be re-validated on real data inside the company before any use.</li>
+            <li>Reasons are associations, not causes. The model also credited negative tickets rather than ticket counts (collinearity), so one true rule was not recovered.</li>
+            <li>The semantic reviewer is itself a language model and can err; headlines are not verified. Groq processes requests outside Pakistan, acceptable only because aggregated facts are sent.</li>
+            <li>Future work: survival analysis (when a subscriber will leave) and uplift modelling (who an offer actually changes), which needs a real past campaign to learn from.</li>
           </ol>
         </div>
       </div>

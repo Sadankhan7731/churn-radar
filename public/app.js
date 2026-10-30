@@ -35,16 +35,32 @@ function chart(id, config) {
 function renderOverview() {
   const k = D.kpis;
   document.getElementById("kpis").innerHTML = [
-    ["Subscribers scored", NUM(k.subscribers), "active paying base"],
+    ["Subscribers scored", NUM(k.subscribers), `${k.signals} signals each`],
     ["Expected cancellations", NUM(k.expected_churners), PCT(k.expected_churn_rate, 1) + " of the base, next 30 days"],
     ["Revenue at risk", PKR(k.revenue_at_risk_pkr), "per month, whole base"],
     ["High-risk revenue at risk", PKR(k.high_risk_revenue_at_risk_pkr), `top decile, ${NUM(k.high_risk_subscribers)} subscribers`],
   ].map(([l, v, n]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
 
+  const ct = D.content.filter(c => c.fans_whose_title_ended > 0);
+  document.getElementById("contentTable").innerHTML =
+    `<thead><tr><th>Genre</th><th>Ended</th><th>Next release</th><th class="num">In</th><th class="num">Waiting</th><th class="num">High-risk</th></tr></thead><tbody>` +
+    ct.map(c => `<tr><td>${esc(c.genre)}</td><td class="wrap" style="min-width:150px">${esc(c.ended_title)}<div class="hint small" style="margin:0">${c.ended_days_ago} days ago</div></td>
+      <td class="wrap" style="min-width:130px">${esc(c.next_title)}</td><td class="num">${c.next_release_in_days} d</td>
+      <td class="num">${NUM(c.fans_whose_title_ended)}</td><td class="num"><b>${NUM(c.high_risk_waiting)}</b></td></tr>`).join("") + "</tbody>";
+  const worst = [...ct].sort((a, b) => b.high_risk_waiting - a.high_risk_waiting)[0];
+  document.getElementById("contentNote").textContent = worst ?
+    `${worst.genre} followers face the longest exposure: ${NUM(worst.high_risk_waiting)} high-risk fans must wait ${worst.next_release_in_days} days for ${worst.next_title}. ` +
+    `Genres with a release within a week show lower risk among waiting fans.` : "";
+  document.getElementById("personaTable").innerHTML =
+    `<thead><tr><th>Persona</th><th class="num">Subscribers</th><th class="num">Avg risk</th><th class="num">High-risk</th><th class="num">Revenue at risk</th></tr></thead><tbody>` +
+    D.personas.map(p => `<tr><td class="wrap" style="min-width:170px"><b>${esc(p.persona)}</b><div class="hint small" style="margin:0">${esc(p.description)}</div></td>
+      <td class="num">${NUM(p.subscribers)}</td><td class="num">${PCT(p.avg_risk, 1)}</td><td class="num">${NUM(p.high_risk)}</td>
+      <td class="num">${PKR(p.revenue_at_risk_pkr)}</td></tr>`).join("") + "</tbody>";
+
   chart("reasonsChart", {
     type: "bar",
-    data: { labels: D.reason_summary.map(r => r.label),
-            datasets: [{ data: D.reason_summary.map(r => r.share * 100), backgroundColor: css("--navy"), barThickness: 14 }] },
+    data: { labels: D.reason_summary.slice(0, 12).map(r => `${r.label} (${r.group})`),
+            datasets: [{ data: D.reason_summary.slice(0, 12).map(r => r.share * 100), backgroundColor: css("--navy"), barThickness: 12 }] },
     options: { indexAxis: "y", maintainAspectRatio: false, plugins: { legend: { display: false },
                tooltip: { callbacks: { label: c => `${c.raw.toFixed(0)}% of high-risk subscribers` } } },
                scales: { x: { ticks: { callback: v => v + "%" } }, y: { grid: { display: false } } } },
@@ -182,22 +198,45 @@ document.getElementById("regen").addEventListener("click", async e => {
 // ---------- priority contact list ----------
 const ACTIONS = {
   watch_change_pct: "Send a personalised selection of content matched to their viewing history.",
+  watch_trend_8w_pct: "Start a re-engagement series: new titles in their favourite category over the next four weeks.",
   days_since_active: "Send a win-back message summarising what is new since their last visit.",
-  failed_renewals_30d: "Offer payment assistance: a top-up reminder, or a move to wallet billing.",
-  support_tickets_30d: "Arrange a call-back from support to resolve the open issue.",
+  completion_rate: "Recommend shorter formats and highly rated titles in their category.",
+  category_concentration: "Introduce one adjacent category they are likely to enjoy, to widen their reasons to stay.",
+  fav_content_ended: "Promote the next release in their genre, with dates, and highlights of what just ended.",
+  days_to_next_release: "Bridge the gap until the next release with related content and a release reminder.",
+  recs_ignored_30d: "Refresh their recommendations; ask two quick taste questions in the app.",
+  failed_renewals_30d: "Offer payment assistance: a top-up reminder before renewal, or a move to wallet billing.",
+  low_balance_renewals_30d: "Shift the renewal date to just after their usual recharge, or offer a weekly plan.",
+  payment_switches_90d: "Confirm their preferred payment method and make it the default.",
   buffering_errors_7d: "Provide streaming guidance and check device or network quality.",
-  tenure_days: "Send an onboarding sequence presenting the strongest titles in the catalogue.",
-  sports_season_over: "Promote forthcoming fixtures and highlight packages.",
+  app_crashes_7d: "Prompt an app update and pass the device details to engineering.",
+  video_start_sec: "Suggest a lower starting quality on their network; flag the network to engineering.",
+  plan_downgrades_90d: "Check what they miss from the higher plan; offer a short trial of it.",
+  past_cancellations: "Treat as a returning customer: a welcome-back message with what has changed.",
+  offer_open_rate: "Stop generic offers; use a single personalised message instead.",
   used_discount: "Offer added value (content or a data bundle) rather than a further discount.",
+  support_tickets_30d: "Arrange a call-back from support to resolve the open issue.",
+  ticket_negative: "Escalate to a senior agent for a personal call-back within 24 hours.",
+  tenure_days: "Send an onboarding sequence presenting the strongest titles in the catalogue.",
   sessions_7d: "Send a short trailer for a title likely to interest them.",
   plan_Daily: "Propose an upgrade to a Weekly or Monthly plan at a modest saving.",
 };
 const FACT_LABELS = {
-  watch_change_pct: ["Change in viewing vs prior week", v => v.toFixed(0) + "%"],
+  watch_change_pct: ["Viewing change vs prior week", v => v.toFixed(0) + "%"],
+  watch_trend_8w_pct: ["Viewing trend, 8 weeks (per month)", v => v.toFixed(0) + "%"],
   days_since_active: ["Days since last active", v => v.toFixed(1)],
+  completion_rate: ["Completion rate", v => (v * 100).toFixed(0) + "%"],
+  category_concentration: ["Share of viewing in one category", v => (v * 100).toFixed(0) + "%"],
+  fav_content_ended: ["Followed title has ended", v => (v >= 0.5 ? "Yes" : (v * 100).toFixed(0) + "%")],
+  days_to_next_release: ["Days to next release in genre", v => v.toFixed(0)],
   failed_renewals_30d: ["Failed renewals, 30 days", v => v.toFixed(1)],
-  support_tickets_30d: ["Support tickets, 30 days", v => v.toFixed(1)],
+  low_balance_renewals_30d: ["Low-balance renewals, 30 days", v => v.toFixed(1)],
   buffering_errors_7d: ["Buffering errors, 7 days", v => v.toFixed(1)],
+  app_crashes_7d: ["App crashes, 7 days", v => v.toFixed(1)],
+  video_start_sec: ["Video start time, seconds", v => v.toFixed(1)],
+  support_tickets_30d: ["Support tickets, 30 days", v => v.toFixed(1)],
+  ticket_negative: ["Negative ticket", v => (v >= 0.5 ? "Yes" : (v * 100).toFixed(0) + "%")],
+  offer_open_rate: ["Offers opened", v => (v * 100).toFixed(0) + "%"],
   tenure_days: ["Tenure, days", v => v.toFixed(0)],
   sessions_7d: ["Sessions, 7 days", v => v.toFixed(1)],
 };
@@ -206,20 +245,21 @@ function renderWatchFilters() {
   const opts = (sel, vals) => sel.insertAdjacentHTML("beforeend", vals.map(v => `<option>${esc(v)}</option>`).join(""));
   opts(document.getElementById("wPlan"), [...new Set(D.watchlist.map(w => w.plan))].sort());
   opts(document.getElementById("wChannel"), [...new Set(D.watchlist.map(w => w.channel))].sort());
-  ["wSearch", "wPlan", "wChannel"].forEach(id => document.getElementById(id).addEventListener("input", renderWatch));
+  opts(document.getElementById("wPersona"), D.personas.map(p => p.persona).filter(p => D.watchlist.some(w => w.persona === p)));
+  ["wSearch", "wPlan", "wChannel", "wPersona"].forEach(id => document.getElementById(id).addEventListener("input", renderWatch));
 }
 
 const riskColor = s => (s >= .3 ? css("--burgundy") : s >= .15 ? css("--gold") : css("--slate"));
 
 function renderWatch() {
   const q = document.getElementById("wSearch").value.trim().toUpperCase();
-  const plan = document.getElementById("wPlan").value, ch = document.getElementById("wChannel").value;
-  const rows = D.watchlist.filter(w => (!q || w.id.includes(q)) && (!plan || w.plan === plan) && (!ch || w.channel === ch));
+  const plan = document.getElementById("wPlan").value, ch = document.getElementById("wChannel").value, pe = document.getElementById("wPersona").value;
+  const rows = D.watchlist.filter(w => (!q || w.id.includes(q)) && (!plan || w.plan === plan) && (!ch || w.channel === ch) && (!pe || w.persona === pe));
   document.getElementById("watchTable").innerHTML =
-    `<thead><tr><th class="num">Rank</th><th>Subscriber</th><th>Probability</th><th>Plan</th><th>Channel</th><th class="num">PKR / month</th><th>Principal reason</th></tr></thead><tbody>` +
+    `<thead><tr><th class="num">Rank</th><th>Subscriber</th><th>Probability</th><th>Persona</th><th>Plan</th><th>Channel</th><th class="num">PKR / month</th><th>Principal reason</th></tr></thead><tbody>` +
     rows.map(w => `<tr class="click" data-id="${w.id}"><td class="num">${w.rank}</td><td>${w.id}</td>
       <td><span class="bar" style="width:${w.score * 70}px;background:${riskColor(w.score)}"></span>${PCT(w.score)}</td>
-      <td>${esc(w.plan)}</td><td>${esc(w.channel)}</td><td class="num">${w.revenue}</td>
+      <td>${esc(w.persona)}</td><td>${esc(w.plan)}</td><td>${esc(w.channel)}</td><td class="num">${w.revenue}</td>
       <td>${w.reasons[0] ? esc(w.reasons[0].text) : "—"}</td></tr>`).join("") + "</tbody>";
   document.querySelectorAll("#watchTable tr.click").forEach(tr => tr.addEventListener("click", () => {
     document.querySelectorAll("#watchTable tr.sel").forEach(x => x.classList.remove("sel"));
@@ -234,11 +274,11 @@ function explain(id) {
   document.getElementById("explain").innerHTML = `
     <div class="label">Subscriber explanation</div>
     <div class="subject">${w.id}</div>
-    <p class="hint" style="margin:0">${esc(w.plan)} plan · ${esc(w.channel)} · ${esc(w.city)} · ${esc(w.genre)} · PKR ${w.revenue} per month</p>
+    <p class="hint" style="margin:0">${esc(w.plan)} plan · ${esc(w.channel)} · ${esc(w.city)} · ${esc(w.genre)} · PKR ${w.revenue} per month<br>Persona: <b>${esc(w.persona)}</b></p>
     <div class="score-line"><span class="big">${PCT(w.score)}</span>
       <span>probability of cancelling within 30 days<br><span class="hint small">Rank ${w.rank} of ${NUM(D.kpis.subscribers)}; ${(w.score / D.kpis.expected_churn_rate).toFixed(1)} times the base average</span></span></div>
     <h3>Principal reasons</h3>
-    ${w.reasons.map(r => `<div class="reason">${esc(r.text)}<div class="rbar" style="width:${r.weight / maxW * 100}%"></div></div>`).join("") || "<p class='hint'>No single dominant reason.</p>"}
+    ${w.reasons.map(r => `<div class="reason">${esc(r.text)} <span class="hint small">· ${esc(r.group)}</span><div class="rbar" style="width:${r.weight / maxW * 100}%"></div></div>`).join("") || "<p class='hint'>No single dominant reason.</p>"}
     <h3>Against the base average</h3>
     <table><thead><tr><th>Measure</th><th class="num">Subscriber</th><th class="num">Average</th></tr></thead><tbody>${Object.entries(FACT_LABELS).map(([k, [lab, f]]) =>
       `<tr><td>${lab}</td><td class="num"><b>${f(w.facts[k])}</b></td><td class="num">${f(D.population_avg[k])}</td></tr>`).join("")}</tbody></table>
@@ -328,9 +368,13 @@ function renderModel() {
                scales: { x: { title: { display: true, text: "Predicted churn, %" } }, y: { title: { display: true, text: "Observed churn, %" } } } },
   });
 
-  const NICE = { watch_change_pct: "Change in viewing", days_since_active: "Days inactive", failed_renewals_30d: "Failed renewals",
-                 support_tickets_30d: "Support tickets", buffering_errors_7d: "Buffering errors", tenure_days: "Tenure",
-                 sports_season_over: "Sports series ended", used_discount: "Discount history" };
+  const NICE = { watch_change_pct: "Change in viewing (week)", watch_trend_8w_pct: "Viewing trend (8 weeks)", days_since_active: "Days inactive",
+                 completion_rate: "Completion rate", category_concentration: "One-category viewing", fav_content_ended: "Followed title ended",
+                 catalogue_match_titles: "Catalogue match", recs_ignored_30d: "Ignored recommendations", failed_renewals_30d: "Failed renewals",
+                 low_balance_renewals_30d: "Low balance at renewal", payment_switches_90d: "Payment method switches", buffering_errors_7d: "Buffering errors",
+                 app_crashes_7d: "App crashes", video_start_sec: "Video start time", login_failures_30d: "Login failures",
+                 plan_downgrades_90d: "Plan downgrades", past_cancellations: "Past cancellations", used_discount: "Discount history",
+                 support_tickets_30d: "Support tickets", ticket_negative: "Negative ticket", ticket_resolved: "Ticket resolved", tenure_days: "Tenure" };
   document.getElementById("ruleTable").innerHTML =
     `<thead><tr><th>Signal</th><th>True effect</th><th class="num">Model coefficient</th><th>Recovered</th></tr></thead><tbody>` +
     D.rule_check.map(r => `<tr><td>${NICE[r.feature] || esc(r.feature)}</td><td>${r.true_effect}</td>

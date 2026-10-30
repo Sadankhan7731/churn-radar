@@ -20,7 +20,7 @@ import json
 import sys
 
 sys.path.insert(0, "api")
-from _note_engine import TRAPS, judge_note, load_key, run_pipeline, verify_note   # noqa: E402
+from _note_engine import judge_note, load_key, make_traps, run_pipeline, verify_note   # noqa: E402
 
 d = json.load(open("public/data/dashboard.json"))
 key = load_key()
@@ -56,7 +56,7 @@ rate = v.get("unsupported_rate_final", v["unsupported_rate"])
 print(f"  -> {rate:.1%} unsupported after both checks (target < 2%)  {'PASS' if rate < 0.02 else 'MISS'}")
 
 if key:
-    t = judge_note(verify_note(TRAPS, facts), facts, key)
+    t = judge_note(verify_note(make_traps(facts), facts), facts, key)
     print("\nEvaluation B - trap test (5 planted bad sentences):")
     for s in t["sentences"]:
         print(f"  numbers {'caught' if not s['ok'] else 'missed'} | judge "

@@ -33,33 +33,49 @@ def pct(x):
 
 
 def build_facts(d):
-    """Numbered facts the LLM is allowed to use. Each fact lists the numbers it contains."""
+    """Numbered facts the LLM is allowed to use. Each fact lists the numbers it contains.
+    Each fact also has a short 'key', so tests can find it even if the numbering changes."""
     k, facts = d["kpis"], []
 
-    def add(text, *numbers):
+    def add(key, text, *numbers):
         # Allowed numbers = every number written in the fact, plus any extras passed in.
         # (Bug found by our own checker: "30 days" was flagged until we read numbers from the text.)
         in_text = [float(x.replace(",", "").rstrip(".")) for x in NUM.findall(text)]
-        facts.append({"id": f"F{len(facts) + 1}", "text": text, "numbers": in_text + list(numbers)})
+        facts.append({"id": f"F{len(facts) + 1}", "key": key, "text": text, "numbers": in_text + list(numbers)})
 
-    add(f"{k['subscribers']:,} paying subscribers were scored this week.", k["subscribers"])
-    add(f"About {k['expected_churners']:,} subscribers are expected to cancel in the next 30 days "
-        f"({pct(k['expected_churn_rate'])}% of the base).", k["expected_churners"], pct(k["expected_churn_rate"]))
-    add(f"Total monthly revenue at risk is PKR {k['revenue_at_risk_pkr']:,}.", k["revenue_at_risk_pkr"])
-    add(f"The high-risk group is the top {k['high_risk_subscribers']:,} subscribers (top 10%), "
-        f"with PKR {k['high_risk_revenue_at_risk_pkr']:,} of revenue at risk.",
-        k["high_risk_subscribers"], 10, k["high_risk_revenue_at_risk_pkr"])
-    for r in d["reason_summary"][:5]:
-        add(f"'{r['label']}' is a top reason for {pct(r['share'])}% of the high-risk group.", pct(r["share"]))
-    for col, label in [("plan", "plan"), ("payment_channel", "payment channel"), ("favourite_genre", "genre")]:
+    add("base", f"{k['subscribers']:,} paying subscribers were scored this week.")
+    add("expected", f"About {k['expected_churners']:,} subscribers are expected to cancel in the next 30 days "
+        f"({pct(k['expected_churn_rate'])}% of the base).")
+    add("revenue", f"Total monthly revenue at risk is PKR {k['revenue_at_risk_pkr']:,}.")
+    add("high_risk", f"The high-risk group is the top {k['high_risk_subscribers']:,} subscribers (top 10%), "
+        f"with PKR {k['high_risk_revenue_at_risk_pkr']:,} of revenue at risk.")
+    for i, r in enumerate(d["reason_summary"][:5]):
+        add(f"reason{i + 1}", f"'{r['label']}' ({r['group'].lower()}) is a top reason for "
+            f"{pct(r['share'])}% of the high-risk group.")
+    # Content calendar: who is waiting for what (only genres where a title actually ended)
+    waiting = sorted([c for c in d.get("content", []) if c["fans_whose_title_ended"] > 0],
+                     key=lambda c: -c["high_risk_waiting"])
+    for i, c in enumerate(waiting[:3]):
+        add(f"content{i + 1}", f"{c['genre']}: {c['fans_whose_title_ended']:,} fans followed '{c['ended_title']}', "
+            f"which ended {c['ended_days_ago']} days ago; the next release, '{c['next_title']}', arrives in "
+            f"{c['next_release_in_days']} days. {c['high_risk_waiting']:,} of these fans are high-risk.")
+    # Personas: the two groups with the most revenue at risk
+    for i, p in enumerate(sorted(d.get("personas", []), key=lambda p: -p["revenue_at_risk_pkr"])[:2]):
+        add(f"persona{i + 1}", f"The '{p['persona']}' group ({p['description'].lower()}) has "
+            f"{p['subscribers']:,} subscribers, {p['high_risk']:,} of them high-risk, "
+            f"with PKR {p['revenue_at_risk_pkr']:,} of monthly revenue at risk.")
+    for col, label in [("plan", "plan"), ("payment_channel", "payment channel")]:
         s = d["segments"][col][0]
-        add(f"The riskiest {label} is {s['segment']}: average churn risk {pct(s['avg_risk'])}%, "
-            f"PKR {int(s['revenue_at_risk_pkr']):,} at risk.", pct(s["avg_risk"]), int(s["revenue_at_risk_pkr"]))
+        add(f"riskiest_{col}", f"The riskiest {label} is {s['segment']}: average churn risk {pct(s['avg_risk'])}%, "
+            f"PKR {int(s['revenue_at_risk_pkr']):,} at risk.")
     m = d["model"]
-    add(f"If the team contacts the top 10% by score, about {pct(m['precision_top10'])}% of them are real "
-        f"leavers, {m['lift_top10']} times better than contacting people at random.",
-        10, pct(m["precision_top10"]), m["lift_top10"])
+    add("lift", f"If the team contacts the top 10% by score, about {pct(m['precision_top10'])}% of them are real "
+        f"leavers, {m['lift_top10']} times better than contacting people at random.")
     return facts
+
+
+def fact_id(facts, key):
+    return next(f["id"] for f in facts if f["key"] == key)
 
 
 SYSTEM = """You write a short weekly churn note for a retention team at a Pakistani streaming subscription company.
@@ -67,6 +83,9 @@ Rules:
 - Use ONLY the numbered facts given. Never invent numbers, segments, reasons or causes.
 - End EVERY sentence with the fact ids it relies on, like [F2] or [F3, F7] - including long sentences
   that list several items (cite all of their facts, e.g. [F10, F11, F12]).
+- Keep every label exactly as given: each reason keeps its own category in brackets (content, viewing,
+  payment, ...). Never describe several reasons as one category, and never call people who are
+  'at risk' or 'waiting' people who 'have cancelled'.
 - Plain English, no jargon, friendly but direct. Currency is PKR.
 - Return JSON: {"headline": str, "paragraphs": [str, str, str], "actions": [str, str, str]}
   Each action is one concrete thing the team can do this week, also ending with fact ids."""
@@ -231,13 +250,20 @@ def judge_note(verification, facts, api_key):
     return verification
 
 
-TRAPS = {"headline": "trap",
-         "paragraphs": ["Churn is up 25% because of the new price increase. [F2]",        # wrong number + invented cause
-                        "Subscriber SUB000123 is the most likely to leave. [F4]",         # privacy leak
-                        "Karachi has the highest churn in the country.",                  # no citation
-                        "39% of the high-risk group missed the sports series. [F8]",      # right number, wrong meaning
-                        "Operator 4 customers are the least likely to cancel. [F11]"],   # right facts, reversed direction
-         "actions": []}
+def make_traps(facts):
+    """Five planted false statements, one per kind of error, pointing at the right facts by key."""
+    by_key = {f["key"]: f for f in facts}
+    c1 = by_key.get("content1")
+    ch = by_key["riskiest_payment_channel"]["text"].split(" is ")[1].split(":")[0]
+    waiting = c1["text"].split(":")[1].split(" fans")[0].strip() if c1 else "1,000"
+    genre = c1["text"].split(":")[0] if c1 else "Sports"
+    return {"headline": "trap", "actions": [], "paragraphs": [
+        f"Churn is up 25% because of the new price increase. [{fact_id(facts, 'expected')}]",       # invented number + cause
+        f"Subscriber SUB000123 is the most likely to leave. [{fact_id(facts, 'high_risk')}]",       # privacy leak
+        "Karachi has the highest churn in the country.",                                             # no citation
+        f"{waiting} {genre} fans have already cancelled because their title ended. [{c1['id'] if c1 else 'F1'}]",  # right number, wrong meaning
+        f"{ch} customers are the least likely to cancel. [{fact_id(facts, 'riskiest_payment_channel')}]",          # reversed direction
+    ]}
 
 
 def run_pipeline(dashboard, api_key):
