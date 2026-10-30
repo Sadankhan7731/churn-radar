@@ -379,20 +379,30 @@ Rules:
 Return JSON: {"answer": str, "followups": [three short follow-up questions the facts can answer]}"""
 
 SCENARIO_RULES = """
-WHAT-IF QUESTIONS: if the user asks what would happen if something changed (fixing a problem, reaching a share
-of customers, running an offer), do NOT answer and do NOT calculate. Instead return ONLY:
-{"scenario": {"lever": <one id below>, "value": <number>, "label": "<short description of the scenario>"}}
-Levers (value meaning):
-  pay       - % of failed and low-balance renewals prevented (1-100)
-  start     - cap on video start time in seconds (1-10)
-  buffer    - % reduction in buffering and app crashes (1-100)
-  support   - % of negative support tickets turned around (1-100)
-  content   - bring the next release forward to within this many days (0-30)
-  engage    - % of the viewing decline recovered (1-100)
-  plan      - % of Daily-pack customers moved to Monthly (1-100)
-  campaign  - number of highest-risk customers contacted with a 15% one-month offer
-Pick the closest lever. If the user says "5% of this" about a payment channel or payment problem, use "pay" with 5;
-about contacting or retaining customers, use "campaign". Use the conversation to resolve "this"."""
+YOU ARE CONNECTED TO THE WHAT-IF SIMULATOR. Never calculate yourself; the simulator (the same churn model) computes.
+Levers ("value" meaning):
+  pay       % of failed and low-balance renewals prevented (1-100)
+  start     cap on video start time in seconds (1-10)
+  buffer    % reduction in buffering and app crashes (1-100)
+  support   % of negative support tickets turned around (1-100)
+  content   bring the next release forward to within this many days (0-30)
+  engage    % of the viewing decline recovered (1-100)
+  plan      % of Daily-pack customers moved to Monthly (1-100)
+A scenario object:
+  {"label": "<short name>", "base": "none" | "current",
+   "changes": [{"lever": "<id>", "value": <number>}, ...],
+   "campaign": null | {"customers": <number contacted, highest risk first>, "discount_pct": <0-50>},
+   "goal": null | {"kind": "customers" | "revenue", "amount": <number>, "more": <true if the user says "more"/"additional"/"extra">}}
+  "base": "current" builds on the user's current simulator scenario (a fact describes it); "none" starts from nothing.
+  Use "goal" when the user asks what it would take to reach a number of customers or PKR of revenue.
+
+1) What-if or options questions ("what if...", "what are my options to...", "compare..."):
+   return ONLY {"scenarios": [1 to 3 scenario objects]} - give 2-3 genuinely different options when asked for options.
+2) Requests to put something into the simulator ("apply", "implement", "set it up", "load option 2", "add a 20% discount"):
+   return ONLY {"apply": <one scenario object>}. Use the scenarios from earlier assistant messages to resolve
+   "it", "option 2", "that one". To modify what is already in the simulator, use "base": "current".
+3) Everything else: answer normally from the facts.
+Use the conversation to resolve "this" and "that". "5% of this" about payments means lever pay with 5."""
 
 LEVERS = {"pay", "start", "buffer", "support", "content", "engage", "plan", "campaign"}
 
@@ -411,19 +421,54 @@ def clean_facts(raw):
     return facts
 
 
+def clean_scenario(sc):
+    """The model's scenario request, validated: known levers, sane numbers, nothing else."""
+    if not isinstance(sc, dict):
+        return None
+    num = lambda v, lo, hi: max(lo, min(hi, float(v)))
+    try:
+        changes = []
+        for c in (sc.get("changes") or ([{"lever": sc["lever"], "value": sc["value"]}] if sc.get("lever") not in (None, "campaign") else []))[:7]:
+            if c.get("lever") in LEVERS - {"campaign"}:
+                hi = 10 if c["lever"] == "start" else 30 if c["lever"] == "content" else 100
+                changes.append({"lever": c["lever"], "value": num(c.get("value"), 0, hi)})
+        camp = sc.get("campaign")
+        if sc.get("lever") == "campaign":                       # older single-lever form
+            camp = {"customers": sc.get("value"), "discount_pct": 15}
+        if isinstance(camp, dict) and camp.get("customers") is not None:
+            camp = {"customers": num(camp["customers"], 1, 10_000_000), "discount_pct": num(camp.get("discount_pct", 15) or 0, 0, 50)}
+        else:
+            camp = None
+        goal = sc.get("goal")
+        if isinstance(goal, dict) and goal.get("kind") in ("customers", "revenue") and goal.get("amount") is not None:
+            goal = {"kind": goal["kind"], "amount": num(goal["amount"], 1, 1e9), "more": bool(goal.get("more"))}
+        else:
+            goal = None
+    except (TypeError, ValueError, KeyError):
+        return None
+    if not (changes or camp or goal):
+        return None
+    return {"label": str(sc.get("label", "Scenario"))[:80], "base": "current" if sc.get("base") == "current" else "none",
+            "changes": changes, "campaign": camp, "goal": goal}
+
+
 def answer_question(facts, question, history, api_key, allow_scenario=True):
     question = str(question)[:500]
     if PRIVATE.search(question):
         raise ValueError("please don't include customer IDs or phone numbers in questions")
     system = CHAT_SYSTEM + (SCENARIO_RULES if allow_scenario else
-                            "\nThe facts include the result of the user's what-if scenario: explain it, citing it.")
+                            "\nThe facts include simulator results (scenarios S1-S3, or what was just applied). Explain them for an "
+                            "executive, cite them, and when there are several, compare them and say which fits the goal best.")
     msgs = [{"role": "system", "content": system},
             {"role": "user", "content": f"FACTS:\n{facts_block(facts)}"}]
     for h in (history or [])[-6:]:
         if h.get("role") == "user":
             msgs.append({"role": "user", "content": str(h.get("content", ""))[:800]})
         elif h.get("role") == "assistant":       # keep past answers in the same JSON shape, so the model keeps the format
-            msgs.append({"role": "assistant", "content": json.dumps({"answer": str(h.get("content", ""))[:800]})})
+            past = {"answer": str(h.get("content", ""))[:800]}
+            if isinstance(h.get("scenarios"), list):
+                past["scenarios"] = h["scenarios"][:3]
+            msgs.append({"role": "assistant", "content": json.dumps(past)[:2500]})
     msgs.append({"role": "user", "content": question})
     try:
         out, meta = _chat(msgs, api_key, MODEL, temperature=0.2, max_tokens=1200, retries=1)
@@ -433,15 +478,16 @@ def answer_question(facts, question, history, api_key, allow_scenario=True):
             raise
         out, meta = {"answer": text}, {"model": MODEL, "seconds": 0, "input_tokens": 0, "output_tokens": 0,
                                         "cost_usd": 0.0, "price_is_estimate": True, "rescued": True}
-    sc = out.get("scenario")
-    if allow_scenario and isinstance(sc, dict) and sc.get("lever") in LEVERS:
-        try:
-            value = float(sc.get("value"))
-        except (TypeError, ValueError):
-            value = None
-        if value is not None:
-            return {"scenario": {"lever": sc["lever"], "value": value, "label": str(sc.get("label", ""))[:120]},
-                    "meta": {**meta, "total_cost_usd": meta["cost_usd"]}}
+    if allow_scenario:
+        scenarios = out.get("scenarios") or ([out["scenario"]] if isinstance(out.get("scenario"), dict) else None)
+        if out.get("apply") is not None:
+            sc = clean_scenario(out["apply"])
+            if sc:
+                return {"apply": sc, "meta": {**meta, "total_cost_usd": meta["cost_usd"]}}
+        if isinstance(scenarios, list):
+            clean = [c for c in (clean_scenario(x) for x in scenarios[:3]) if c]
+            if clean:
+                return {"scenarios": clean, "meta": {**meta, "total_cost_usd": meta["cost_usd"]}}
     answer = str(out.get("answer", "")).strip()
     v = verify_note({"paragraphs": [answer], "actions": []}, facts, allow_plain=True)
     try:

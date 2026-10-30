@@ -778,78 +778,150 @@ function pPricing() {
 }
 function aPricing() { $$('.plan a[href="#/pricing"]').forEach(a => a.onclick = e => { e.preventDefault(); toast("Sales enquiries open after the pilot — use Starter with your own data meanwhile"); }); }
 
-// ---- AI assistant
+// ---- AI assistant, connected to the What-if simulator
+// The assistant never calculates. For what-if questions it asks for scenarios; the browser computes them with
+// the same model as the simulator; the assistant then explains the computed numbers (checked like any answer).
+// "Apply" requests change the simulator itself, which opens beside the chat.
 const CHATS = { demo: [] };
-const SUGGEST = ["What is driving churn right now?", "Which customer group should we focus on first?", "How much revenue is at risk, and where?", "Would a 15% offer to the top 10% pay off?"];
+const SUGGEST = ["What are my options to keep 1,000 more customers?", "What if we fix 30% of failed payments?",
+  "How is my current simulator scenario doing?", "What is driving churn right now?"];
+const offSettings = () => ({ levers: Object.fromEntries(Sim.LEVERS.map(l => [l.id, { on: false, value: l.control.def, cost: "" }])),
+  camp: { on: false, n: Math.round(Sim.size * 0.1), save: SIMSET.camp.save, disc: SIMSET.camp.disc, take: SIMSET.camp.take }, goal: { ...SIMSET.goal } });
+function scenarioToSettings(sc) {
+  const st = sc.base === "current" ? JSON.parse(JSON.stringify(SIMSET)) : offSettings();
+  for (const c of sc.changes || []) st.levers[c.lever] = { ...st.levers[c.lever], on: true, value: c.value };
+  if (sc.campaign) st.camp = { ...st.camp, on: true, n: Math.max(1, Math.min(Sim.size, Math.round(sc.campaign.customers))), disc: (sc.campaign.discount_pct ?? 15) / 100 };
+  if (sc.goal) {
+    // "1,000 MORE customers" = on top of what the current simulator scenario already achieves
+    let amount = sc.goal.amount;
+    if (sc.goal.more && Sim.ready) { const now = evaluate(SIMSET, false); amount += sc.goal.kind === "customers" ? now.kept : now.gain; }
+    st.goal = { kind: sc.goal.kind, amount: Math.round(amount) };
+  }
+  return st;
+}
+function describeSettings(st) {
+  const fixes = Sim.LEVERS.filter(l => st.levers[l.id].on).map(l => `${l.name.toLowerCase()} (${st.levers[l.id].value}${l.control.kind === "pct" ? "%" : l.control.unit})`);
+  const camp = st.camp.on ? `a ${PCT(st.camp.disc)} one-month offer to the ${NUM(st.camp.n)} highest-risk customers (assuming ${PCT(st.camp.save)} of likely leavers are kept and ${PCT(st.camp.take)} uptake)` : "no campaign";
+  return `${fixes.length ? "fixes: " + fixes.join(", ") : "no operational fixes"}; ${camp}`;
+}
+function evaluate(st, withGoal) {
+  const r = Sim.run(st.levers, st.camp);
+  const out = { kept: r.kept, gain: r.gain, cost: r.cost, net: r.net, final: r.final, base: r.base.E };
+  if (withGoal) out.goal = Sim.goal(r.out, st.goal.kind, st.goal.amount, st.camp.save, st.camp.disc || 0.15, st.camp.take, r.leverAvoided, r.leverGain);
+  return out;
+}
+function resultText(r) {
+  let t = `expected cancellations in the next 30 days fall from ${NUM(r.base)} to ${NUM(r.final)}, keeping about ${NUM(r.kept)} customers; revenue kept rises by about PKR ${NUM(r.gain)} a month at a cost of about PKR ${NUM(r.cost)}, a net of PKR ${NUM(r.net)} a month.`;
+  if (r.goal) {
+    const g = r.goal, what = r.goalKind === "customers" ? `keep ${NUM(r.goalAmount)} customers` : `protect PKR ${NUM(r.goalAmount)} a month`;
+    t += g.byLevers ? ` Goal to ${what}: already met by the fixes alone.` : g.reached
+      ? ` Goal to ${what}: contact the ${NUM(g.contacted)} highest-risk customers, at an offer cost of about PKR ${NUM(g.cost)}.`
+      : ` Goal to ${what}: not reachable with these assumptions; at most about ${NUM(g.max)} from a campaign.`;
+  }
+  return t;
+}
+function simCurrentFact() {
+  if (!Sim.ready || simFor !== CUR) return null;
+  const r = evaluate(SIMSET, true); r.goalKind = SIMSET.goal.kind; r.goalAmount = SIMSET.goal.amount;
+  return { key: "sim_current", text: `Current What-if simulator scenario (computed by the churn model): ${describeSettings(SIMSET)}. Result: ${resultText(r)}` };
+}
 function chatFacts() {
   const f = Engine.facts(D), b = base();
   f.push({ key: "campaign", text: `A 15% one-month offer to the top 10% by score, assuming 30% of likely leavers are kept and 50% of those who stay use the offer, costs about PKR ${NUM(b.cost)} and protects about PKR ${NUM(b.protectedRev)} a month: a net PKR ${NUM(b.net)}. The same offer sent to random customers would net PKR ${NUM(b.rNet)}.` });
+  const cur = simCurrentFact(); if (cur) f.push(cur);
   return f;
 }
+function applyToSimulator(st, changedIds = []) {
+  Object.assign(SIMSET, JSON.parse(JSON.stringify(st)));
+  simKeep = true;
+  if (location.hash.startsWith("#/simulator") && $("#levers")) { drawLevers(); drawCampaign(); drawGoal(); compute(); flashLevers(changedIds); }
+  else { location.hash = "#/simulator"; setTimeout(() => flashLevers(changedIds), 900); }
+}
+function flashLevers(ids) {
+  for (const id of ids) { const el = document.querySelector(`[data-lever="${id}"]`); if (el) { el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); } }
+  const k = $("#simKpis"); if (k) { k.classList.remove("flash"); void k.offsetWidth; k.classList.add("flash"); }
+}
 function renderAnswer(m) {
-  const v = m.verification, s = v.sentences; let i = 0;
-  const html = m.answer.split(SPLIT).filter(Boolean).map(x => sentence(x, s[i++])).join(" ");
-  const flagged = v.flagged_final ?? v.flagged;
-  const cited = [...new Set(s.flatMap(x => x.cited))].map(id => m.facts.find(f => f.id === id)).filter(Boolean);
-  return `<div class="msg bot"><div class="bubble">${html}</div>
-    <div class="msg-meta">${flagged ? `<span class="pill no">${flagged} statement${flagged > 1 ? "s" : ""} couldn't be verified</span>` : `<span class="pill ok">Checked against your figures</span>`}<span>$${m.meta.total_cost_usd.toFixed(4)}</span></div>
+  const v = m.verification, s = v ? v.sentences : []; let i = 0;
+  const html = (m.answer || "").split(SPLIT).filter(Boolean).map(x => sentence(x, s[i++])).join(" ");
+  const flagged = v ? (v.flagged_final ?? v.flagged) : 0;
+  const cited = [...new Set(s.flatMap(x => x.cited))].map(id => (m.facts || []).find(f => f.id === id)).filter(Boolean);
+  const cards = (m.computed || []).length ? `<div class="scn-grid">${m.computed.map((c, k) => `<div class="scn">
+      <div class="scn-h"><span class="scn-n">${m.computed.length > 1 ? "Option " + (k + 1) : "Scenario"}</span><b>${esc(c.label)}</b></div>
+      <div class="scn-d">${esc(c.desc)}</div>
+      <div class="scn-m"><span><small>Kept</small>${fmtSigned(c.kept)}</span><span><small>Net / mo</small><b style="color:${c.net >= 0 ? "var(--green)" : "var(--red)"}">${fmtSigned(c.net, PKRs)}</b></span><span><small>Cost / mo</small>${PKRs(c.cost)}</span></div>
+      ${c.goalLine ? `<div class="scn-g">${esc(c.goalLine)}</div>` : ""}
+      <button class="btn btn-secondary" type="button" data-apply="${m.id}:${k}">Apply to simulator</button></div>`).join("")}</div>` : "";
+  return `<div class="msg bot">${m.applied ? `<div class="applied">✓ Applied to the What-if simulator: ${esc(m.applied.label)}</div>` : ""}
+    ${html ? `<div class="bubble">${html}</div>` : ""}${cards}
+    <div class="msg-meta">${flagged ? `<span class="pill no">${flagged} statement${flagged > 1 ? "s" : ""} couldn't be verified</span>` : v ? `<span class="pill ok">Checked against your figures</span>` : ""}
+      ${m.computed || m.applied ? `<span class="pill blue plain">Numbers computed by the model</span>` : ""}<span>$${((m.meta && m.meta.total_cost_usd) || 0).toFixed(4)}</span></div>
     ${cited.length ? `<details><summary>Sources (${cited.length})</summary><ol>${cited.map(f => `<li value="${f.id.slice(1)}">${esc(f.text)}</li>`).join("")}</ol></details>` : ""}
-    ${m.scenarioSettings ? `<div style="margin-top:8px"><button class="btn btn-secondary" type="button" data-open-sim="${esc(JSON.stringify(m.scenarioSettings))}">Open this scenario in the simulator</button>
-      <span class="muted" style="font-size:12px;margin-left:6px">Computed by the model, not estimated by the AI</span></div>` : ""}
+    ${m.applied ? `<div style="margin-top:8px"><a class="btn btn-secondary" href="#/simulator">View in simulator</a></div>` : ""}
     ${m.followups && m.followups.length ? `<div class="chips" style="margin-top:8px">${m.followups.map(q => `<button class="chip" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>` : ""}</div>`;
 }
 function renderChat() {
   const log = $("#chatLog"); if (!log || !D) return;
   CHATS[CUR] ||= [];
-  $("#chatScope").textContent = "Dataset: " + (D.dataset && D.dataset.own ? D.dataset.name : "Lumen Play (sample)");
-  log.innerHTML = (CHATS[CUR].length ? "" : `<div class="msg bot"><div class="bubble">Ask me about churn in the active dataset. I only see aggregate figures, and every number I give is checked against them.</div>
+  $("#chatScope").textContent = "Dataset: " + (D.dataset && D.dataset.own ? D.dataset.name : "Lumen Play (sample)") + " · connected to the What-if simulator";
+  log.innerHTML = (CHATS[CUR].length ? "" : `<div class="msg bot"><div class="bubble">Ask me about churn, or explore decisions: I can work out options with the What-if simulator and set them up there for you. I only see aggregate figures, and every number I give is computed by the model and checked.</div>
     <div class="chips" style="margin-top:8px">${SUGGEST.map(q => `<button class="chip" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div></div>`) +
     CHATS[CUR].map(m => m.role === "user" ? `<div class="msg user">${esc(m.content)}</div>` : m.error ? `<div class="msg bot"><div class="bubble">${esc(m.error)}</div>${m.retry ? `<div class="chips" style="margin-top:8px"><button class="chip" type="button" data-q="${esc(m.retry)}">Try again</button></div>` : ""}</div>` : renderAnswer(m)).join("");
   $$("#chatLog [data-q]").forEach(c => c.onclick = () => ask(c.dataset.q));
-  $$("#chatLog [data-open-sim]").forEach(b => b.onclick = () => {
-    const st = JSON.parse(b.dataset.openSim); Object.assign(SIMSET, st);
-    if (!SIMSET.camp.on) SIMSET.camp.n = Math.round(Sim.size * 0.1);
-    chat.hidden = true; simKeep = true; location.hash = "#/simulator"; toast("Scenario loaded in the What-if simulator");
+  $$("#chatLog [data-apply]").forEach(b => b.onclick = () => {
+    const [id, k] = b.dataset.apply.split(":"), m = CHATS[CUR].find(x => x.id === id), c = m && m.computed[+k];
+    if (!c) return;
+    applyToSimulator(c.settings, (m.scenarios[+k].changes || []).map(x => x.lever));
+    CHATS[CUR].push({ role: "bot", id: "a" + Date.now(), applied: { label: c.label }, answer: `Done — “${c.label}” is now in the What-if simulator: ${c.desc}. You can fine-tune it there, or ask me to change it.`, meta: { total_cost_usd: 0 } });
+    renderChat(); toast(`Applied “${c.label}” to the simulator`);
   });
   log.scrollTop = log.scrollHeight;
-}
-async function runChatScenario(sc) {
-  await ensureSimBase();
-  const settings = { levers: Object.fromEntries(Sim.LEVERS.map(l => [l.id, { on: false, value: l.control.def, cost: "" }])),
-    camp: { on: false, n: 0, save: 0.3, disc: 0.15, take: 0.5 }, goal: { kind: "customers", amount: 500 } };
-  const L = Sim.LEVERS.find(l => l.id === sc.lever);
-  let text;
-  if (sc.lever === "campaign" || !L) {
-    settings.camp = { on: true, n: Math.max(1, Math.min(Sim.size, Math.round(sc.value))), save: 0.3, disc: 0.15, take: 0.5 };
-    const r = Sim.run(settings.levers, settings.camp), c = r.campaign;
-    text = `Scenario "${sc.label || "campaign"}" (computed by the churn model): contacting the ${NUM(c.contacted)} highest-risk customers with a 15% one-month offer, assuming 30% of likely leavers are kept and 50% of those who stay use the offer, reaches about ${NUM(c.leavers)} likely leavers, keeps about ${NUM(c.saved)} customers and protects about PKR ${NUM(c.revKept)} a month, at an offer cost of about PKR ${NUM(c.cost)}: a net of PKR ${NUM(c.revKept - c.cost)} a month.`;
-  } else {
-    const v = L.control.kind === "pct" ? Math.max(1, Math.min(100, sc.value)) : Math.max(0, sc.value);
-    settings.levers[L.id] = { on: true, value: v, cost: "" };
-    const r = Sim.run(settings.levers, settings.camp), pl = r.perLever[0];
-    const what = L.control.kind === "pct" ? `${v}%` : `${v}${L.control.unit}`;
-    text = `Scenario "${sc.label || L.name}" (computed by the churn model): ${L.name.toLowerCase()} — ${L.control.label.toLowerCase()} ${what}. It affects about ${NUM(pl.affected)} customers, lowers expected cancellations in the next 30 days by about ${NUM(pl.avoided)} (from ${NUM(r.base.E)} to ${NUM(r.afterLevers)}), and changes monthly revenue kept by about PKR ${NUM(pl.revGain)}.`;
-  }
-  return { text, settings };
 }
 async function ask(q) {
   q = q.trim(); if (!q) return;
   const hist = CHATS[CUR];
   hist.push({ role: "user", content: q }); renderChat();
-  $("#chatLog").insertAdjacentHTML("beforeend", `<div class="msg bot" id="typing"><span class="typing"><i></i><i></i><i></i></span></div>`); $("#chatLog").scrollTop = 1e9;
+  const say = t => { const el = $("#typing .typing-note"); if (el) el.textContent = t; };
+  $("#chatLog").insertAdjacentHTML("beforeend", `<div class="msg bot" id="typing"><span class="typing"><i></i><i></i><i></i></span><span class="typing-note muted" style="font-size:12px;margin-left:8px"></span></div>`); $("#chatLog").scrollTop = 1e9;
   try {
-    const history = hist.slice(0, -1).filter(m => !m.error).slice(-6).map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.role === "user" ? m.content : m.answer }));
+    if (!Sim.ready || simFor !== CUR) { say("Connecting to the simulator…"); await ensureSimBase(); }
+    const history = hist.slice(0, -1).filter(m => !m.error).slice(-6).map(m => m.role === "user" ? { role: "user", content: m.content }
+      : { role: "assistant", content: m.answer || "", scenarios: m.scenarios || (m.applied && m.appliedScenario ? [m.appliedScenario] : undefined) });
     const post = async body => { const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j; };
-    let j = await post({ question: q, facts: chatFacts(), history });
-    if (j.scenario) {
-      // What-if: the AI asked for a scenario. The browser computes it with the simulator (same model),
-      // then the AI explains the computed numbers, which are checked like any other answer.
-      const typing = $("#typing .typing"); if (typing) typing.insertAdjacentHTML("afterend", `<span class="muted" style="font-size:12px;margin-left:8px">Running the scenario in the simulator…</span>`);
-      const sc = await runChatScenario(j.scenario);
-      j = { ...(await post({ question: q, facts: [...chatFacts(), { key: "scenario", text: sc.text }], history, scenario_result: true })), scenario: j.scenario, scenarioSettings: sc.settings };
+    const facts = chatFacts();
+    let j = await post({ question: q, facts, history });
+    const id = "m" + Date.now();
+    if (j.scenarios) {
+      say(`Running ${j.scenarios.length} scenario${j.scenarios.length > 1 ? "s" : ""} in the simulator…`);
+      const computed = j.scenarios.map((sc, k) => {
+        const st = scenarioToSettings(sc), r = evaluate(st, !!sc.goal);
+        r.goalKind = st.goal.kind; r.goalAmount = st.goal.amount;
+        const g = r.goal, what = st.goal.kind === "customers" ? `keep ${NUM(st.goal.amount)} customers` : `protect ${PKRs(st.goal.amount)}/month`;
+        return { label: sc.label, settings: st, desc: describeSettings(st), kept: r.kept, net: r.net, cost: r.cost, gain: r.gain,
+          goalLine: g ? (g.byLevers ? `Goal (${what}): met by the fixes alone` : g.reached ? `Goal (${what}): contact ${NUM(g.contacted)} customers, offer cost ${PKRs(g.cost)}` : `Goal (${what}): not reachable with these assumptions`) : "",
+          fact: { key: "scenario" + (k + 1), text: `Scenario S${k + 1} "${sc.label}" (computed by the churn model): ${describeSettings(st)}. Result: ${resultText(r)}` } };
+      });
+      say("Explaining the results…");
+      let j2;
+      try { j2 = await post({ question: q, facts: [...facts, ...computed.map(c => c.fact)], history, scenario_result: true }); }
+      catch (e) {                         // explanation unavailable (e.g. rate limit): the computed options still stand
+        const best = [...computed].sort((a, b) => b.net - a.net)[0];
+        j2 = { answer: `Here ${computed.length > 1 ? `are ${computed.length} options` : "is the scenario"}, computed by the model. ${computed.length > 1 ? `“${best.label}” has the highest net impact.` : ""} Apply any of them to the simulator to explore further.`, meta: j.meta };
+      }
+      hist.push({ role: "bot", id, ...j2, scenarios: j.scenarios, computed });
+    } else if (j.apply) {
+      say("Updating the simulator…");
+      const st = scenarioToSettings(j.apply), changed = (j.apply.changes || []).map(c => c.lever);
+      applyToSimulator(st, changed);
+      const r = evaluate(st, !!j.apply.goal); r.goalKind = st.goal.kind; r.goalAmount = st.goal.amount;
+      // The confirmation is written by the app from the computed result: instant, free and exact (no second AI call)
+      hist.push({ role: "bot", id, applied: { label: j.apply.label }, appliedScenario: j.apply, meta: j.meta,
+        answer: `Done. The simulator now has ${describeSettings(st)}. The model estimates ${resultText(r)}` });
+      toast(`Simulator updated: ${j.apply.label}`);
+    } else {
+      hist.push({ role: "bot", id, ...j });
     }
-    hist.push({ role: "bot", ...j });
   } catch (err) {
     const msg = /^(I couldn't|One moment|please don't|facts must|no facts|The AI assistant)/i.test(err.message) ? err.message : "I couldn't answer that just now. Please try again, or rephrase the question.";
     hist.push({ role: "bot", error: msg, retry: q });
@@ -857,8 +929,13 @@ async function ask(q) {
   renderChat();
 }
 const chat = $("#chat");
-$("#askBtn").onclick = () => { chat.hidden = !chat.hidden; if (!chat.hidden) { renderChat(); $("#chatInput").focus(); } };
-$("#chatClose").onclick = () => { chat.hidden = true; $("#askBtn").focus(); };
+function setChat(open) {
+  chat.hidden = !open; document.body.classList.toggle("chat-open", open);
+  if (open) { renderChat(); $("#chatInput").focus(); }
+  charts.forEach(c => c.resize());
+}
+$("#askBtn").onclick = () => setChat(chat.hidden);
+$("#chatClose").onclick = () => { setChat(false); $("#askBtn").focus(); };
 $("#chatForm").onsubmit = e => { e.preventDefault(); const t = $("#chatInput"); const q = t.value; t.value = ""; ask(q); };
 $("#chatInput").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chatForm").requestSubmit(); } };
 
@@ -888,7 +965,7 @@ async function ensureSimBase() {
 }
 function pSimulator() {
   return `<div class="ph"><div><h1>What-if simulator</h1><p>Change what you would fix or fund, and Churn Radar re-scores every customer to estimate the result. Set a goal and it works out what you'd need.</p></div>
-    <div class="ph-actions"><button class="btn btn-secondary" id="simReset" type="button">Reset</button><button class="btn" id="simSave" type="button">Save scenario</button></div></div>
+    <div class="ph-actions"><button class="btn btn-secondary" id="simAsk" type="button">Ask AI about this scenario</button><button class="btn btn-secondary" id="simReset" type="button">Reset</button><button class="btn" id="simSave" type="button">Save scenario</button></div></div>
   <div id="simKpis" class="grid c4"><div class="kpi"><div class="kpi-l">Preparing the simulation…</div><div class="kpi-v">—</div><div class="kpi-s">Scoring ${D.dataset && D.dataset.own ? "your customers" : "a 20,000-customer sample of the base"}</div></div></div>
   <div class="grid c-3-2 mt" style="align-items:start">
     <div class="grid">
@@ -1010,6 +1087,7 @@ async function aSimulator() {
   try { await ensureSimBase(); } catch (e) { $("#simKpis").innerHTML = `<div class="kpi">Couldn't prepare the simulation: ${esc(e.message)}</div>`; return; }
   if (!$("#levers")) return;
   drawLevers(); drawCampaign(); drawGoal(); drawSaved(); compute();
+  $("#simAsk").onclick = () => { setChat(true); ask("Explain my current simulator scenario and what would improve it."); };
   $("#simReset").onclick = () => { for (const l of Sim.LEVERS) SIMSET.levers[l.id] = { on: false, value: l.control.def, cost: "" };
     Object.assign(SIMSET.camp, { on: true, n: Math.max(10, Math.round(Sim.size * 0.1 / (Sim.size >= 10000 ? 100 : 10)) * (Sim.size >= 10000 ? 100 : 10)), save: 0.3, disc: 0.15, take: 0.5 }); drawLevers(); drawCampaign(); recalc(); };
   $("#simSave").onclick = () => {

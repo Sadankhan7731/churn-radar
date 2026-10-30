@@ -374,3 +374,18 @@ tr.row { cursor: pointer; } tr.row:hover { background: var(--hover); } tr.row:fo
 code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
 .code-block { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--r); padding: 12px; background: var(--panel-2); }
 .code-block pre { margin: 0; font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+
+/* ---------- chat <-> simulator ---------- */
+@media (min-width: 1180px) { body.chat-open .main-col { margin-right: 420px; } body.chat-open .chat { box-shadow: none; } }
+.scn-grid { display: grid; gap: 8px; margin-top: 8px; }
+.scn { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--panel); display: flex; flex-direction: column; gap: 6px; }
+.scn-h { display: flex; align-items: baseline; gap: 8px; } .scn-h b { font-weight: 600; }
+.scn-n { font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; }
+.scn-d { font-size: 12px; color: var(--text-2); }
+.scn-m { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; font-variant-numeric: tabular-nums; }
+.scn-m span { display: flex; flex-direction: column; font-size: 13px; } .scn-m small { font-size: 11px; color: var(--text-3); }
+.scn-g { font-size: 12px; color: var(--blue); }
+.scn .btn { align-self: flex-start; height: 28px; font-size: 12.5px; }
+.applied { font-size: 12.5px; font-weight: 600; color: var(--green); margin-bottom: 6px; }
+@keyframes flash { 0% { box-shadow: 0 0 0 2px var(--brand); } 100% { box-shadow: 0 0 0 2px transparent; } }
+.flash { animation: flash 1.6s ease-out; border-radius: var(--r-lg); }
