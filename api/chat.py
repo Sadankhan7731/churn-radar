@@ -28,10 +28,11 @@ def handle(body):
         data = json.loads(body or b"{}")
         facts = clean_facts(data.get("facts"))
         return 200, {**answer_question(facts, data.get("question", ""), data.get("history"), key), "facts": facts}
-    except ValueError as e:
+    except ValueError as e:                      # problems with the request itself: safe to show
         return 400, {"error": str(e)}
-    except Exception as e:
-        return 502, {"error": str(e)[:300]}
+    except Exception as e:                       # model or network trouble: show a friendly message only
+        print("chat error:", repr(e)[:500])       # full detail goes to the server log, not the user
+        return 502, {"error": "I couldn't answer that just now. Please try again, or rephrase the question."}
 
 
 class handler(BaseHTTPRequestHandler):

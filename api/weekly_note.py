@@ -29,7 +29,8 @@ def generate(body=b""):
         note, facts = run_pipeline(dashboard, load_key(), clean_facts(sent) if sent else None)
         return 200, {"note": note, "facts": facts}
     except Exception as e:
-        return 502, {"error": str(e)[:300]}
+        print("briefing error:", repr(e)[:500])
+        return 502, {"error": "The briefing couldn't be written just now. Please try again in a moment."}
 
 
 class handler(BaseHTTPRequestHandler):

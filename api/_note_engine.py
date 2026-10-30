@@ -91,31 +91,75 @@ Rules:
   Each action is one concrete thing the team can do this week, also ending with fact ids."""
 
 
+class JSONReplyError(RuntimeError):
+    """The model's reply was not valid JSON. Carries whatever text it did produce."""
+    def __init__(self, msg, partial=""):
+        super().__init__(msg)
+        self.partial = partial
+
+
+def _salvage(text):
+    """Best-effort rescue of a JSON object from a broken reply (cut off, or with text around it)."""
+    text = (text or "").strip()
+    start = text.find("{")
+    if start == -1:
+        return None
+    for end in range(len(text), start, -1):               # longest valid {...} first
+        if text[end - 1] == "}":
+            try:
+                return json.loads(text[start:end])
+            except ValueError:
+                continue
+    m = re.search(r'"answer"\s*:\s*"((?:[^"\\]|\\.)*)', text)  # cut-off JSON: keep the answer text
+    if m:
+        return {"answer": json.loads('"' + m.group(1).rstrip("\\") + '"')}
+    return None
+
+
 def _chat(messages, api_key, model, temperature=0.2, max_tokens=900, retries=2):
     """One call to Groq. Returns (parsed JSON answer, usage info).
 
     max_tokens matters on Groq's free tier: some models allow only ~1,000 output
     tokens per minute, and Groq rejects a request that MIGHT exceed that (error 429).
+
+    Robustness (bug found in the live chat): JSON mode sometimes fails with
+    'json_validate_failed', usually because the model's hidden reasoning used up the
+    token budget and the JSON was cut off. We then retry once with more room, and if
+    that fails too, rescue the JSON from the partial reply Groq sends back.
     """
-    body = {"model": model, "temperature": temperature, "max_completion_tokens": max_tokens,
-            "response_format": {"type": "json_object"}, "messages": messages}
-    if model.startswith("openai/gpt-oss"):
-        body["reasoning_effort"] = "low"   # gpt-oss thinks before answering; low = faster and cheaper
-    req = urllib.request.Request(GROQ_URL, data=json.dumps(body).encode(), headers={
-        "Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
-        "User-Agent": "churn-radar/1.0"})
     t0 = time.time()
+    partial = ""
     for attempt in range(retries + 1):
+        body = {"model": model, "temperature": temperature, "max_completion_tokens": max_tokens,
+                "response_format": {"type": "json_object"}, "messages": messages}
+        if model.startswith("openai/gpt-oss"):
+            body["reasoning_effort"] = "low"   # gpt-oss thinks before answering; low = faster and cheaper
+        req = urllib.request.Request(GROQ_URL, data=json.dumps(body).encode(), headers={
+            "Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
+            "User-Agent": "churn-radar/1.0"})
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read())
             break
         except urllib.error.HTTPError as e:
-            msg = e.read().decode()[:300]
+            raw = e.read().decode()
             if e.code == 429 and attempt < retries:      # rate limit: wait and try again
                 time.sleep(8 * (attempt + 1))
                 continue
-            raise RuntimeError(f"Groq returned {e.code}: {msg}") from None
+            if e.code == 400 and "json_validate_failed" in raw:
+                try:
+                    partial = json.loads(raw).get("error", {}).get("failed_generation", "") or partial
+                except ValueError:
+                    pass
+                if attempt < retries:                    # retry with more room for the answer
+                    max_tokens = min(int(max_tokens * 1.6), 2000)
+                    continue
+                rescued = _salvage(partial)
+                if rescued:
+                    return rescued, {"model": model, "seconds": round(time.time() - t0, 2), "input_tokens": 0,
+                                     "output_tokens": 0, "cost_usd": 0.0, "price_is_estimate": True, "rescued": True}
+                raise JSONReplyError("the model's reply was not valid JSON", partial) from None
+            raise RuntimeError(f"Groq returned {e.code}: {raw[:300]}") from None
     usage = data.get("usage", {})
     tin, tout = usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
     price_in, price_out = PRICES.get(model, DEFAULT_PRICE)
@@ -123,7 +167,14 @@ def _chat(messages, api_key, model, temperature=0.2, max_tokens=900, retries=2):
             "input_tokens": tin, "output_tokens": tout,
             "cost_usd": round(tin / 1e6 * price_in + tout / 1e6 * price_out, 6),
             "price_is_estimate": model not in PRICES}
-    return json.loads(data["choices"][0]["message"]["content"]), meta
+    content = data["choices"][0]["message"]["content"]
+    try:
+        return json.loads(content), meta
+    except ValueError:
+        rescued = _salvage(content)
+        if rescued:
+            return rescued, {**meta, "rescued": True}
+        raise JSONReplyError("the model's reply was not valid JSON", content) from None
 
 
 def facts_block(facts):
@@ -153,6 +204,9 @@ def demo_note(facts):
 
 
 NUM = re.compile(r"\d[\d,]*\.?\d*")
+# Split after . ! ? or ] - but not after a list number like "1." at the start of an item
+SENT_SPLIT = re.compile(r"(?<=[.!?\]])(?<!^\d\.)(?<!^\d\d\.)\s+(?=[A-Z])")
+SCALED = re.compile(r"(\d[\d,]*\.?\d*)\s*(million|mn|m|k|thousand)?\b", re.IGNORECASE)
 PRIVATE = re.compile(r"SUB\d{4,}|\b03\d{9}\b|\+92\d{10}")   # subscriber IDs or Pakistani phone numbers
 
 
@@ -163,7 +217,7 @@ def verify_note(note, facts, allow_plain=False):
     by_id = {f["id"]: f for f in facts}
     sentences = []
     for part in note.get("paragraphs", []) + note.get("actions", []):
-        sentences += [s.strip() for s in re.split(r"(?<=[.!?\]])\s+(?=[A-Z])", part) if s.strip()]
+        sentences += [s.strip() for s in SENT_SPLIT.split(part) if s.strip()]
 
     checked = []
     for s in sentences:
@@ -189,10 +243,14 @@ def verify_note(note, facts, allow_plain=False):
             problems.append(f"cites facts that do not exist: {', '.join(bad)}")
         allowed = [n for c in cited if c in by_id for n in by_id[c]["numbers"]]
         text_wo_cites = re.sub(r"\[[^\]]*\]", "", s)
-        for raw in NUM.findall(text_wo_cites):
+        text_wo_cites = re.sub(r"^\s*\d{1,2}[.)]\s+", "", text_wo_cites)          # list numbering "1. " is not a claim
+        for m in SCALED.finditer(text_wo_cites):
+            raw, unit = m.group(1), (m.group(2) or "").lower()
             n = float(raw.replace(",", "").rstrip("."))
+            n *= {"million": 1e6, "m": 1e6, "mn": 1e6, "k": 1e3, "thousand": 1e3}.get(unit, 1)
+            # Rounded forms ("PKR 2.76 million" for 2,764,263) are fine within 1%
             if not any(abs(n - a) <= max(0.5, abs(a) * 0.01) for a in allowed):
-                problems.append(f"number {raw} is not in the cited facts")
+                problems.append(f"number {raw}{(' ' + unit) if unit else ''} is not in the cited facts")
         if PRIVATE.search(s):
             problems.append("contains a subscriber ID or phone number")
         checked.append({"sentence": s, "cited": cited, "ok": not problems, "problems": problems})
@@ -344,7 +402,7 @@ def answer_question(facts, question, history, api_key):
         if h.get("role") in ("user", "assistant"):
             msgs.append({"role": h["role"], "content": str(h.get("content", ""))[:800]})
     msgs.append({"role": "user", "content": question})
-    out, meta = _chat(msgs, api_key, MODEL, temperature=0.2, max_tokens=700)
+    out, meta = _chat(msgs, api_key, MODEL, temperature=0.2, max_tokens=1200)
     answer = str(out.get("answer", "")).strip()
     v = verify_note({"paragraphs": [answer], "actions": []}, facts, allow_plain=True)
     try:

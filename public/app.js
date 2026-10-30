@@ -245,7 +245,7 @@ function aOverview() {
 }
 
 // ---- briefing
-const SPLIT = /(?<=[.!?\]])\s+(?=[A-Z])/;
+const SPLIT = /(?<=[.!?\]])(?<!^\d{1,2}\.)\s+(?=[A-Z])/;   // same rule as the server: don't split after "1."
 const strip = s => s.replace(/\s*\[[^\]]*\]/g, "");
 const okFinal = c => (c.ok_final !== undefined ? c.ok_final : c.ok);
 function sentence(text, chk) {
@@ -678,7 +678,7 @@ function renderChat() {
   $("#chatScope").textContent = "Dataset: " + (D.dataset && D.dataset.own ? D.dataset.name : "Lumen Play (sample)");
   log.innerHTML = (CHATS[CUR].length ? "" : `<div class="msg bot"><div class="bubble">Ask me about churn in the active dataset. I only see aggregate figures, and every number I give is checked against them.</div>
     <div class="chips" style="margin-top:8px">${SUGGEST.map(q => `<button class="chip" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div></div>`) +
-    CHATS[CUR].map(m => m.role === "user" ? `<div class="msg user">${esc(m.content)}</div>` : m.error ? `<div class="msg bot"><div class="bubble">${esc(m.error)}</div></div>` : renderAnswer(m)).join("");
+    CHATS[CUR].map(m => m.role === "user" ? `<div class="msg user">${esc(m.content)}</div>` : m.error ? `<div class="msg bot"><div class="bubble">${esc(m.error)}</div>${m.retry ? `<div class="chips" style="margin-top:8px"><button class="chip" type="button" data-q="${esc(m.retry)}">Try again</button></div>` : ""}</div>` : renderAnswer(m)).join("");
   $$("#chatLog [data-q]").forEach(c => c.onclick = () => ask(c.dataset.q));
   log.scrollTop = log.scrollHeight;
 }
@@ -692,7 +692,10 @@ async function ask(q) {
     const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, facts: chatFacts(), history }) });
     const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
     hist.push({ role: "bot", ...j });
-  } catch (err) { hist.push({ role: "bot", error: "Sorry — " + err.message }); }
+  } catch (err) {
+    const msg = /^(I couldn't|One moment|please don't|facts must|no facts|The AI assistant)/i.test(err.message) ? err.message : "I couldn't answer that just now. Please try again, or rephrase the question.";
+    hist.push({ role: "bot", error: msg, retry: q });
+  }
   renderChat();
 }
 const chat = $("#chat");
