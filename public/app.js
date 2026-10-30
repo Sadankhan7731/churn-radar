@@ -674,7 +674,8 @@ function drawLive(msg) {
   const h = LIVE.health;
   el.innerHTML = `
     <form class="row" id="liveForm"><input class="input" id="liveUrl" value="${esc(LIVE.url)}" aria-label="Connector address" style="flex:1;min-width:0"><button class="btn" type="submit">${h ? "Reconnect" : "Connect"}</button></form>
-    ${msg ? `<p class="muted">${msg}</p>` : LIVE.error ? `<p style="color:var(--red);font-size:12.5px">Couldn't connect: ${esc(LIVE.error)}. Start the connector next to your database (see “Database tables” below).</p>` : ""}
+    ${msg ? `<p class="muted">${msg}</p>` : LIVE.error ? `<p style="color:var(--red);font-size:12.5px">Couldn't connect: ${esc(LIVE.error)}. Start the connector next to your database (see “Database tables” below).${
+      location.protocol === "https:" && /localhost|127\.0\.0\.1/.test(LIVE.url) ? " If your browser asks to allow access to devices on your local network, choose Allow; some browsers block this for public sites, in which case open Churn Radar from your own network instead." : ""}</p>` : ""}
     ${h ? `<div class="live-status"><span class="live-dot"></span><div><b>${esc(h.database)}</b><div class="muted" style="font-size:12px">${NUM(h.active_customers)} active customers · platform time ${esc(h.platform_time.slice(0, 16))} · ${NUM(h.sessions_last_hour)} sessions in the last hour</div></div></div>
       <div class="row" style="align-items:center"><button class="btn btn-secondary" id="syncNow" type="button" ${LIVE.syncing ? "disabled" : ""}>${LIVE.syncing ? "Syncing…" : "Sync now"}</button>
         <label class="muted" style="font-size:12.5px">Auto-sync <select class="sel" id="autoSync">${[[0, "Off"], [30, "Every 30 s"], [60, "Every minute"], [300, "Every 5 min"]].map(([v, l]) => `<option value="${v}" ${LIVE.interval === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>` : ""}`;
