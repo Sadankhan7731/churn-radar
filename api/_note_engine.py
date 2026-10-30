@@ -375,7 +375,26 @@ Rules:
 - Keep every label exactly as written in the facts. Never invent numbers, causes, segments or trends.
 - If the facts do not answer the question, say so in one sentence without a citation, and say what data would be needed.
 - Never give individual customer details; you only see totals.
+- Never do arithmetic to create new numbers (no percentages of figures, no projections).
 Return JSON: {"answer": str, "followups": [three short follow-up questions the facts can answer]}"""
+
+SCENARIO_RULES = """
+WHAT-IF QUESTIONS: if the user asks what would happen if something changed (fixing a problem, reaching a share
+of customers, running an offer), do NOT answer and do NOT calculate. Instead return ONLY:
+{"scenario": {"lever": <one id below>, "value": <number>, "label": "<short description of the scenario>"}}
+Levers (value meaning):
+  pay       - % of failed and low-balance renewals prevented (1-100)
+  start     - cap on video start time in seconds (1-10)
+  buffer    - % reduction in buffering and app crashes (1-100)
+  support   - % of negative support tickets turned around (1-100)
+  content   - bring the next release forward to within this many days (0-30)
+  engage    - % of the viewing decline recovered (1-100)
+  plan      - % of Daily-pack customers moved to Monthly (1-100)
+  campaign  - number of highest-risk customers contacted with a 15% one-month offer
+Pick the closest lever. If the user says "5% of this" about a payment channel or payment problem, use "pay" with 5;
+about contacting or retaining customers, use "campaign". Use the conversation to resolve "this"."""
+
+LEVERS = {"pay", "start", "buffer", "support", "content", "engage", "plan", "campaign"}
 
 
 def clean_facts(raw):
@@ -392,17 +411,37 @@ def clean_facts(raw):
     return facts
 
 
-def answer_question(facts, question, history, api_key):
+def answer_question(facts, question, history, api_key, allow_scenario=True):
     question = str(question)[:500]
     if PRIVATE.search(question):
         raise ValueError("please don't include customer IDs or phone numbers in questions")
-    msgs = [{"role": "system", "content": CHAT_SYSTEM},
+    system = CHAT_SYSTEM + (SCENARIO_RULES if allow_scenario else
+                            "\nThe facts include the result of the user's what-if scenario: explain it, citing it.")
+    msgs = [{"role": "system", "content": system},
             {"role": "user", "content": f"FACTS:\n{facts_block(facts)}"}]
     for h in (history or [])[-6:]:
-        if h.get("role") in ("user", "assistant"):
-            msgs.append({"role": h["role"], "content": str(h.get("content", ""))[:800]})
+        if h.get("role") == "user":
+            msgs.append({"role": "user", "content": str(h.get("content", ""))[:800]})
+        elif h.get("role") == "assistant":       # keep past answers in the same JSON shape, so the model keeps the format
+            msgs.append({"role": "assistant", "content": json.dumps({"answer": str(h.get("content", ""))[:800]})})
     msgs.append({"role": "user", "content": question})
-    out, meta = _chat(msgs, api_key, MODEL, temperature=0.2, max_tokens=1200)
+    try:
+        out, meta = _chat(msgs, api_key, MODEL, temperature=0.2, max_tokens=1200, retries=1)
+    except JSONReplyError as e:                  # the model answered in plain prose: keep the prose, still check it
+        text = re.split(r"\n\s*\**\s*follow", e.partial or "", flags=re.I)[0].strip()
+        if not text:
+            raise
+        out, meta = {"answer": text}, {"model": MODEL, "seconds": 0, "input_tokens": 0, "output_tokens": 0,
+                                        "cost_usd": 0.0, "price_is_estimate": True, "rescued": True}
+    sc = out.get("scenario")
+    if allow_scenario and isinstance(sc, dict) and sc.get("lever") in LEVERS:
+        try:
+            value = float(sc.get("value"))
+        except (TypeError, ValueError):
+            value = None
+        if value is not None:
+            return {"scenario": {"lever": sc["lever"], "value": value, "label": str(sc.get("label", ""))[:120]},
+                    "meta": {**meta, "total_cost_usd": meta["cost_usd"]}}
     answer = str(out.get("answer", "")).strip()
     v = verify_note({"paragraphs": [answer], "actions": []}, facts, allow_plain=True)
     try:

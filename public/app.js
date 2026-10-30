@@ -794,6 +794,8 @@ function renderAnswer(m) {
   return `<div class="msg bot"><div class="bubble">${html}</div>
     <div class="msg-meta">${flagged ? `<span class="pill no">${flagged} statement${flagged > 1 ? "s" : ""} couldn't be verified</span>` : `<span class="pill ok">Checked against your figures</span>`}<span>$${m.meta.total_cost_usd.toFixed(4)}</span></div>
     ${cited.length ? `<details><summary>Sources (${cited.length})</summary><ol>${cited.map(f => `<li value="${f.id.slice(1)}">${esc(f.text)}</li>`).join("")}</ol></details>` : ""}
+    ${m.scenarioSettings ? `<div style="margin-top:8px"><button class="btn btn-secondary" type="button" data-open-sim="${esc(JSON.stringify(m.scenarioSettings))}">Open this scenario in the simulator</button>
+      <span class="muted" style="font-size:12px;margin-left:6px">Computed by the model, not estimated by the AI</span></div>` : ""}
     ${m.followups && m.followups.length ? `<div class="chips" style="margin-top:8px">${m.followups.map(q => `<button class="chip" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>` : ""}</div>`;
 }
 function renderChat() {
@@ -804,7 +806,31 @@ function renderChat() {
     <div class="chips" style="margin-top:8px">${SUGGEST.map(q => `<button class="chip" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div></div>`) +
     CHATS[CUR].map(m => m.role === "user" ? `<div class="msg user">${esc(m.content)}</div>` : m.error ? `<div class="msg bot"><div class="bubble">${esc(m.error)}</div>${m.retry ? `<div class="chips" style="margin-top:8px"><button class="chip" type="button" data-q="${esc(m.retry)}">Try again</button></div>` : ""}</div>` : renderAnswer(m)).join("");
   $$("#chatLog [data-q]").forEach(c => c.onclick = () => ask(c.dataset.q));
+  $$("#chatLog [data-open-sim]").forEach(b => b.onclick = () => {
+    const st = JSON.parse(b.dataset.openSim); Object.assign(SIMSET, st);
+    if (!SIMSET.camp.on) SIMSET.camp.n = Math.round(Sim.size * 0.1);
+    chat.hidden = true; simKeep = true; location.hash = "#/simulator"; toast("Scenario loaded in the What-if simulator");
+  });
   log.scrollTop = log.scrollHeight;
+}
+async function runChatScenario(sc) {
+  await ensureSimBase();
+  const settings = { levers: Object.fromEntries(Sim.LEVERS.map(l => [l.id, { on: false, value: l.control.def, cost: "" }])),
+    camp: { on: false, n: 0, save: 0.3, disc: 0.15, take: 0.5 }, goal: { kind: "customers", amount: 500 } };
+  const L = Sim.LEVERS.find(l => l.id === sc.lever);
+  let text;
+  if (sc.lever === "campaign" || !L) {
+    settings.camp = { on: true, n: Math.max(1, Math.min(Sim.size, Math.round(sc.value))), save: 0.3, disc: 0.15, take: 0.5 };
+    const r = Sim.run(settings.levers, settings.camp), c = r.campaign;
+    text = `Scenario "${sc.label || "campaign"}" (computed by the churn model): contacting the ${NUM(c.contacted)} highest-risk customers with a 15% one-month offer, assuming 30% of likely leavers are kept and 50% of those who stay use the offer, reaches about ${NUM(c.leavers)} likely leavers, keeps about ${NUM(c.saved)} customers and protects about PKR ${NUM(c.revKept)} a month, at an offer cost of about PKR ${NUM(c.cost)}: a net of PKR ${NUM(c.revKept - c.cost)} a month.`;
+  } else {
+    const v = L.control.kind === "pct" ? Math.max(1, Math.min(100, sc.value)) : Math.max(0, sc.value);
+    settings.levers[L.id] = { on: true, value: v, cost: "" };
+    const r = Sim.run(settings.levers, settings.camp), pl = r.perLever[0];
+    const what = L.control.kind === "pct" ? `${v}%` : `${v}${L.control.unit}`;
+    text = `Scenario "${sc.label || L.name}" (computed by the churn model): ${L.name.toLowerCase()} — ${L.control.label.toLowerCase()} ${what}. It affects about ${NUM(pl.affected)} customers, lowers expected cancellations in the next 30 days by about ${NUM(pl.avoided)} (from ${NUM(r.base.E)} to ${NUM(r.afterLevers)}), and changes monthly revenue kept by about PKR ${NUM(pl.revGain)}.`;
+  }
+  return { text, settings };
 }
 async function ask(q) {
   q = q.trim(); if (!q) return;
@@ -813,8 +839,16 @@ async function ask(q) {
   $("#chatLog").insertAdjacentHTML("beforeend", `<div class="msg bot" id="typing"><span class="typing"><i></i><i></i><i></i></span></div>`); $("#chatLog").scrollTop = 1e9;
   try {
     const history = hist.slice(0, -1).filter(m => !m.error).slice(-6).map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.role === "user" ? m.content : m.answer }));
-    const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, facts: chatFacts(), history }) });
-    const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
+    const post = async body => { const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j; };
+    let j = await post({ question: q, facts: chatFacts(), history });
+    if (j.scenario) {
+      // What-if: the AI asked for a scenario. The browser computes it with the simulator (same model),
+      // then the AI explains the computed numbers, which are checked like any other answer.
+      const typing = $("#typing .typing"); if (typing) typing.insertAdjacentHTML("afterend", `<span class="muted" style="font-size:12px;margin-left:8px">Running the scenario in the simulator…</span>`);
+      const sc = await runChatScenario(j.scenario);
+      j = { ...(await post({ question: q, facts: [...chatFacts(), { key: "scenario", text: sc.text }], history, scenario_result: true })), scenario: j.scenario, scenarioSettings: sc.settings };
+    }
     hist.push({ role: "bot", ...j });
   } catch (err) {
     const msg = /^(I couldn't|One moment|please don't|facts must|no facts|The AI assistant)/i.test(err.message) ? err.message : "I couldn't answer that just now. Please try again, or rephrase the question.";
@@ -834,7 +868,7 @@ const SIMSET = {
   camp: { on: true, n: null, save: 0.3, disc: 0.15, take: 0.5 },
   goal: { kind: "customers", amount: 500 },
 };
-let simFor = null, simBusy = false, simLast = null;
+let simFor = null, simBusy = false, simLast = null, simKeep = false;
 async function ensureSimBase() {
   if (simFor === CUR && Sim.ready) return;
   if (D.dataset && D.dataset.own && D._rows) {
@@ -849,7 +883,8 @@ async function ensureSimBase() {
   simFor = CUR;
   // New dataset: start the campaign at its own top 10% (not the previous dataset's audience)
   const step = Sim.size >= 10000 ? 100 : 10;
-  SIMSET.camp.n = Math.max(step, Math.round(Sim.size * 0.1 / step) * step);
+  if (!simKeep) SIMSET.camp.n = Math.max(step, Math.round(Sim.size * 0.1 / step) * step);
+  simKeep = false;
 }
 function pSimulator() {
   return `<div class="ph"><div><h1>What-if simulator</h1><p>Change what you would fix or fund, and Churn Radar re-scores every customer to estimate the result. Set a goal and it works out what you'd need.</p></div>

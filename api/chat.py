@@ -18,16 +18,21 @@ _last = [0.0]
 
 
 def handle(body):
-    if time.time() - _last[0] < 2:
-        return 429, {"error": "One moment - please wait a couple of seconds between questions."}
-    _last[0] = time.time()
+    try:
+        data = json.loads(body or b"{}")
+    except ValueError:
+        return 400, {"error": "Bad request"}
+    if not data.get("scenario_result"):                  # the follow-up call of a what-if is part of the same question
+        if time.time() - _last[0] < 2:
+            return 429, {"error": "One moment - please wait a couple of seconds between questions."}
+        _last[0] = time.time()
     key = load_key()
     if not key:
         return 503, {"error": "The AI assistant is not configured on this server."}
     try:
-        data = json.loads(body or b"{}")
         facts = clean_facts(data.get("facts"))
-        return 200, {**answer_question(facts, data.get("question", ""), data.get("history"), key), "facts": facts}
+        allow = not data.get("scenario_result")          # second call: explain the computed scenario, don't ask again
+        return 200, {**answer_question(facts, data.get("question", ""), data.get("history"), key, allow_scenario=allow), "facts": facts}
     except ValueError as e:                      # problems with the request itself: safe to show
         return 400, {"error": str(e)}
     except Exception as e:                       # model or network trouble: show a friendly message only
