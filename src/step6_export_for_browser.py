@@ -69,6 +69,9 @@ Path("public/samples").mkdir(parents=True, exist_ok=True)
 sample = df.sample(2000, random_state=7)[RAW]                     # no churn label: that's what we predict
 sample.to_csv("public/samples/lumen_play_sample.csv", index=False)
 pd.DataFrame(columns=RAW).to_csv("public/samples/template.csv", index=False)
+# The what-if simulator re-scores customers under scenarios. A 20% random sample (20,000 customers)
+# is enough to be stable; results are scaled up by 5 to the full base.
+df.sample(20000, random_state=11)[RAW].to_csv("public/samples/simulator_base.csv", index=False)
 
 sql = """-- Churn Radar: export one row per active paying customer, then save the result as CSV
 -- and upload it on the Data sources page. Rename the tables/columns to match your schema.

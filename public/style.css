@@ -341,3 +341,23 @@ tr.row { cursor: pointer; } tr.row:hover { background: var(--hover); } tr.row:fo
 .plan li { display: flex; gap: 8px; } .plan li::before { content: "✓"; color: var(--green); font-weight: 700; }
 .plan li.soon::before { content: "○"; color: var(--text-3); } .plan li.soon { color: var(--text-3); }
 .plan .btn { justify-content: center; margin-top: auto; }
+
+/* ---------- what-if simulator ---------- */
+.lever { padding: 14px 16px; border-bottom: 1px solid var(--border-2); }
+.lever:last-child { border-bottom: 0; }
+.lever.on { background: var(--panel-2); }
+.lever-h { display: flex; gap: 12px; align-items: flex-start; }
+.lever-h b { font-weight: 600; }
+.lever-b { margin: 12px 0 0 46px; }
+.lever-meta { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; font-size: 12.5px; }
+.cost { display: inline-flex; align-items: center; gap: 8px; color: var(--text-3); } .cost .input { width: 130px; height: 28px; }
+.lever-impact { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lever-impact b { display: block; font-size: 14px; } .lever-impact small { color: var(--text-3); font-size: 12px; }
+.lever-impact .pos { color: var(--green); } .lever-impact .neg { color: var(--red); }
+.switch { position: relative; width: 34px; height: 20px; flex: none; margin-top: 2px; }
+.switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; z-index: 1; }
+.switch span { position: absolute; inset: 0; border-radius: 99px; background: var(--border); transition: background .15s; }
+.switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .15s; }
+.switch input:checked + span { background: var(--green); } .switch input:checked + span::after { transform: translateX(14px); }
+.switch input:focus-visible + span { outline: 2px solid var(--blue); outline-offset: 2px; }
+@media (max-width: 640px) { .lever-b { margin-left: 0; } .lever-h { flex-wrap: wrap; } .lever-impact { width: 100%; text-align: left; } }

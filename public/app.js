@@ -597,6 +597,8 @@ function scoreStaged() {
       const matched = Engine.FIELDS.filter(([k]) => staged.map[k]).length;
       DATASETS.mine = Engine.build(rows, { model: DEMO.model, rule_check: DEMO.rule_check },
         { name: staged.name, source: staged.source, map: staged.map, matched });
+      Object.defineProperty(DATASETS.mine, "_rows", { value: rows, enumerable: false });   // for the what-if simulator
+      simFor = null;
       NOTES.mine = null; CHATS.mine = [];
       const secs = ((performance.now() - t0) / 1000).toFixed(1);
       staged = null;
@@ -704,11 +706,171 @@ $("#chatClose").onclick = () => { chat.hidden = true; $("#askBtn").focus(); };
 $("#chatForm").onsubmit = e => { e.preventDefault(); const t = $("#chatInput"); const q = t.value; t.value = ""; ask(q); };
 $("#chatInput").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chatForm").requestSubmit(); } };
 
+// ---- what-if simulator
+const SIMSET = {
+  levers: Object.fromEntries(Sim.LEVERS.map(l => [l.id, { on: ["pay", "support"].includes(l.id), value: l.control.def, cost: "" }])),
+  camp: { on: true, n: null, save: 0.3, disc: 0.15, take: 0.5 },
+  goal: { kind: "customers", amount: 500 },
+};
+let simFor = null, simBusy = false, simLast = null;
+async function ensureSimBase() {
+  if (simFor === CUR && Sim.ready) return;
+  if (D.dataset && D.dataset.own && D._rows) {
+    Sim.prepare(MODEL, D._rows, 1);
+  } else {
+    if (!MODEL) MODEL = await (await fetch("model/churn_model.json")).json();
+    const text = await (await fetch("samples/simulator_base.csv")).text();
+    const raw = await parseCSVText(text);
+    const rows = Engine.score(Engine.normalise(raw, Engine.autoMap(Object.keys(raw[0])), MODEL), MODEL);
+    Sim.prepare(MODEL, rows, DEMO.kpis.subscribers / rows.length);
+  }
+  simFor = CUR;
+  // New dataset: start the campaign at its own top 10% (not the previous dataset's audience)
+  const step = Sim.size >= 10000 ? 100 : 10;
+  SIMSET.camp.n = Math.max(step, Math.round(Sim.size * 0.1 / step) * step);
+}
+function pSimulator() {
+  return `<div class="ph"><div><h1>What-if simulator</h1><p>Change what you would fix or fund, and Churn Radar re-scores every customer to estimate the result. Set a goal and it works out what you'd need.</p></div>
+    <div class="ph-actions"><button class="btn btn-secondary" id="simReset" type="button">Reset</button><button class="btn" id="simSave" type="button">Save scenario</button></div></div>
+  <div id="simKpis" class="grid c4"><div class="kpi"><div class="kpi-l">Preparing the simulation…</div><div class="kpi-v">—</div><div class="kpi-s">Scoring ${D.dataset && D.dataset.own ? "your customers" : "a 20,000-customer sample of the base"}</div></div></div>
+  <div class="grid c-3-2 mt" style="align-items:start">
+    <div class="grid">
+      ${panel("Operational fixes", `<div id="levers"></div>`, { flush: true, sub: "Switch on a fix, set how far it goes, and optionally what it costs per month" })}
+      ${panel("Impact by lever", `<div id="leverTable"></div>`, { flush: true, sub: "Each fix on its own; together they overlap slightly, so the total can differ from the sum" })}
+    </div>
+    <div class="grid">
+      ${panel("Retention campaign", `<div id="campBox"></div>`, { right: `<label class="toggle"><input type="checkbox" id="campOn"> Include</label>` })}
+      ${panel("Goal planner", `<div id="goalBox"></div>`, { sub: "What would it take?" })}
+    </div>
+  </div>
+  <div class="mt">${panel("Saved scenarios", `<div id="saved"></div>`, { flush: true })}</div>
+  <p class="muted" style="font-size:12.5px;margin-top:14px">Estimates assume the patterns the model learned still hold when you change them — they show association, not proven cause. Confirm the biggest bets with a holdout test before rolling out.</p>`;
+}
+const fmtSigned = (n, f = NUM) => (n > 0 ? "+" : n < 0 ? "−" : "") + f(Math.abs(n));
+function drawLevers() {
+  $("#levers").innerHTML = Sim.LEVERS.map(l => {
+    const s = SIMSET.levers[l.id], c = l.control;
+    const shown = c.kind === "pct" ? s.value + "%" : s.value + c.unit;
+    return `<div class="lever ${s.on ? "on" : ""}" data-lever="${l.id}">
+      <div class="lever-h"><label class="switch"><input type="checkbox" data-on="${l.id}" ${s.on ? "checked" : ""}><span></span></label>
+        <div style="flex:1;min-width:0"><b>${l.name}</b> <span class="pill neutral plain" style="margin-left:4px">${l.team}</span><div class="muted" style="font-size:12.5px">${l.desc}</div></div>
+        <div class="lever-impact" id="imp-${l.id}"></div></div>
+      <div class="lever-b" ${s.on ? "" : "hidden"}>
+        <div class="field" style="margin:0"><label>${c.label} <span class="val">${shown}</span></label>
+          <input type="range" data-val="${l.id}" min="${c.min}" max="${c.max}" step="${c.step}" value="${s.value}"></div>
+        <div class="lever-meta"><span class="muted" id="aff-${l.id}"></span>
+          <label class="cost">Cost / month <input class="input" data-cost="${l.id}" inputmode="numeric" placeholder="PKR, optional" value="${esc(s.cost)}"></label></div>
+      </div></div>`;
+  }).join("");
+  $$("[data-on]").forEach(i => i.onchange = () => { SIMSET.levers[i.dataset.on].on = i.checked; drawLevers(); recalc(); });
+  $$("[data-val]").forEach(i => i.oninput = () => { SIMSET.levers[i.dataset.val].value = +i.value; const l = Sim.LEVERS.find(x => x.id === i.dataset.val);
+    i.closest(".field").querySelector(".val").textContent = l.control.kind === "pct" ? i.value + "%" : i.value + l.control.unit; recalc(); });
+  $$("[data-cost]").forEach(i => i.oninput = () => { SIMSET.levers[i.dataset.cost].cost = i.value.replace(/[^0-9]/g, ""); recalc(); });
+}
+function drawCampaign() {
+  const c = SIMSET.camp, size = Sim.size;
+  $("#campOn").checked = c.on;
+  $("#campBox").innerHTML = `
+    <div class="field"><span class="lbl">Customers to contact</span>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-secondary" type="button" data-step="-500">−500</button>
+        <input class="input num" id="campN" inputmode="numeric" value="${NUM(c.n)}" style="width:110px;text-align:right">
+        <button class="btn btn-secondary" type="button" data-step="500">+500</button>
+        <span class="muted" style="font-size:12.5px">highest risk first · ${PCT(c.n / size)} of customers</span></div></div>
+    <div class="field"><span class="lbl">Offer</span><div class="seg" role="group">${[0, 0.1, 0.15, 0.2, 0.3].map(d => `<button type="button" data-disc="${d}" aria-pressed="${c.disc === d}">${d ? d * 100 + "% off" : "No discount"}</button>`).join("")}</div></div>
+    <div class="field"><label>Save rate <span class="val">${PCT(c.save)}</span></label><input type="range" id="campSave" min="5" max="60" step="5" value="${c.save * 100}"><div class="hint">Share of contacted likely-leavers who stay.</div></div>
+    <div class="field" style="margin-bottom:0"><label>Offer uptake <span class="val">${PCT(c.take)}</span></label><input type="range" id="campTake" min="10" max="100" step="10" value="${c.take * 100}"></div>
+    <div id="campOut" class="mt"></div>`;
+  const setN = v => { c.n = Math.max(0, Math.min(size, Math.round(v))); $("#campN").value = NUM(c.n); recalc(); };
+  $$("[data-step]").forEach(b => b.onclick = () => setN(c.n + +b.dataset.step));
+  $("#campN").onchange = e => setN(+e.target.value.replace(/[^0-9]/g, ""));
+  $$("[data-disc]").forEach(b => b.onclick = () => { c.disc = +b.dataset.disc; $$("[data-disc]").forEach(x => x.setAttribute("aria-pressed", x === b)); recalc(); });
+  $("#campSave").oninput = e => { c.save = e.target.value / 100; e.target.previousElementSibling.querySelector(".val").textContent = PCT(c.save); recalc(); };
+  $("#campTake").oninput = e => { c.take = e.target.value / 100; e.target.previousElementSibling.querySelector(".val").textContent = PCT(c.take); recalc(); };
+  $("#campOn").onchange = e => { c.on = e.target.checked; recalc(); };
+}
+function drawGoal() {
+  const g = SIMSET.goal;
+  $("#goalBox").innerHTML = `
+    <div class="field"><span class="lbl">I want to</span><div class="seg" role="group">
+      <button type="button" data-gk="customers" aria-pressed="${g.kind === "customers"}">Keep more customers</button>
+      <button type="button" data-gk="revenue" aria-pressed="${g.kind === "revenue"}">Protect more revenue</button></div></div>
+    <div class="field"><label for="goalAmt">${g.kind === "customers" ? "Customers kept this month" : "Revenue protected per month (PKR)"}</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><input class="input num" id="goalAmt" inputmode="numeric" value="${NUM(g.amount)}" style="width:130px;text-align:right">
+      ${(g.kind === "customers" ? [250, 500, 1000, 2000] : [100000, 250000, 500000]).map(v => `<button class="btn btn-ghost" type="button" data-ga="${v}">${g.kind === "customers" ? NUM(v) : PKRs(v)}</button>`).join("")}</div></div>
+    <div id="goalOut"></div>`;
+  $$("[data-gk]").forEach(b => b.onclick = () => { g.kind = b.dataset.gk; g.amount = g.kind === "customers" ? 500 : 250000; drawGoal(); recalc(); });
+  $$("[data-ga]").forEach(b => b.onclick = () => { g.amount = +b.dataset.ga; drawGoal(); recalc(); });
+  $("#goalAmt").onchange = e => { g.amount = +e.target.value.replace(/[^0-9]/g, "") || 0; e.target.value = NUM(g.amount); recalc(); };
+}
+let recalcQueued = false;
+function recalc() { if (recalcQueued) return; recalcQueued = true; requestAnimationFrame(() => { recalcQueued = false; compute(); }); }
+function compute() {
+  if (!Sim.ready || !$("#simKpis")) return;
+  const c = SIMSET.camp, r = Sim.run(SIMSET.levers, c); simLast = r;
+  const rate = x => PCT(x / r.base.size, 1);
+  $("#simKpis").innerHTML = [
+    kpi("Expected cancellations", `${NUM(r.final)}`, `was ${NUM(r.base.E)} · churn ${rate(r.base.E)} → ${rate(r.final)}`),
+    kpi("Customers kept", fmtSigned(r.kept), `${NUM(r.leverAvoided)} from fixes · ${NUM(r.campaign.saved)} from campaign`, r.kept > 0 ? "green" : ""),
+    kpi("Revenue gained / month", fmtSigned(r.gain, PKRs), `${PKRs(r.gain * 12)} a year`, r.gain >= 0 ? "green" : "red"),
+    kpi("Net after costs / month", fmtSigned(r.net, PKRs), `cost ${PKRs(r.cost)} (${PKRs(r.campaign.cost)} campaign${r.leverCost ? `, ${PKRs(r.leverCost)} fixes` : ""})`, r.net >= 0 ? "green" : "red"),
+  ].join("");
+  for (const l of Sim.LEVERS) {
+    const s = SIMSET.levers[l.id], pl = r.perLever.find(x => x.id === l.id), aff = $(`#aff-${l.id}`), imp = $(`#imp-${l.id}`);
+    if (aff) aff.textContent = s.on ? `Affects ${NUM(pl ? pl.affected : 0)} customers` : "";
+    if (imp) imp.innerHTML = s.on && pl ? `<b class="${pl.revGain >= 0 ? "pos" : "neg"}">${fmtSigned(pl.revGain, PKRs)}</b><small>${fmtSigned(pl.avoided)} kept</small>` : "";
+  }
+  $("#leverTable").innerHTML = r.perLever.length ? `<div class="tbl-wrap"><table><thead><tr><th>Fix</th><th class="r">Customers affected</th><th class="r">Cancellations avoided</th><th class="r">Revenue / month</th><th class="r">Cost</th><th class="r">ROI</th></tr></thead><tbody>${
+    [...r.perLever].sort((a, b) => b.revGain - a.revGain).map(l => `<tr><td><b>${l.name}</b><div class="muted" style="font-size:12px">${l.team}</div></td><td class="r">${NUM(l.affected)}</td><td class="r">${NUM(l.avoided)}</td>
+      <td class="r" style="color:${l.revGain >= 0 ? "var(--green)" : "var(--red)"}">${fmtSigned(l.revGain, PKRs)}</td><td class="r">${l.cost ? PKRs(l.cost) : "—"}</td><td class="r">${l.roi === null ? "—" : (l.roi * 100).toFixed(0) + "%"}</td></tr>`).join("")}
+    <tr><td><b>All fixes together</b></td><td class="r"></td><td class="r"><b>${NUM(r.leverAvoided)}</b></td><td class="r"><b>${fmtSigned(r.leverGain, PKRs)}</b></td><td class="r">${r.leverCost ? PKRs(r.leverCost) : "—"}</td><td></td></tr></tbody></table></div>`
+    : `<p class="muted" style="padding:16px">Switch on a fix to see its effect.</p>`;
+  const cp = r.campaign;
+  $("#campOut").innerHTML = c.on ? [["Likely leavers reached", NUM(cp.leavers)], ["Customers kept", NUM(cp.saved)], ["Revenue protected", PKRs(cp.revKept)], ["Offer cost", PKRs(cp.cost)],
+    ["Net from campaign", `<b style="color:${cp.revKept - cp.cost >= 0 ? "var(--green)" : "var(--red)"}">${fmtSigned(cp.revKept - cp.cost, PKRs)}</b>`]]
+    .map(([a, b]) => `<div class="summary-row"><span class="muted">${a}</span><span>${b}</span></div>`).join("") : `<p class="muted">Campaign not included.</p>`;
+  const g = SIMSET.goal, levKept = r.leverAvoided, levRev = r.leverGain;
+  const gs = Sim.goal(r.out, g.kind, g.amount, c.save, c.disc, c.take, levKept, levRev);
+  const tgt = g.kind === "customers" ? `keep ${NUM(g.amount)} customers` : `protect ${PKRs(g.amount)} a month`;
+  $("#goalOut").innerHTML = gs.byLevers ? `<div class="callout">Your fixes alone already ${tgt}: ${g.kind === "customers" ? NUM(levKept) + " kept" : PKRs(levRev) + " protected"}. No campaign needed.</div>`
+    : gs.reached ? `<div class="callout"><span class="label">To ${tgt}</span>Contact the <b>${NUM(gs.contacted)}</b> highest-risk customers (${PCT(gs.contacted / Sim.size)} of the base) with a ${PCT(c.disc)} offer.
+        Expected: <b>${NUM(gs.saved)}</b> customers kept by the campaign${levKept > 0 ? ` plus ${NUM(levKept)} from your fixes` : ""}, offer cost <b>${PKRs(gs.cost)}</b>, net <b>${fmtSigned(gs.revKept + levRev - gs.cost - r.leverCost, PKRs)}</b> / month.</div>
+        <button class="btn btn-secondary mt" id="applyGoal" type="button">Use this audience in the campaign</button>`
+    : `<div class="callout" style="border-left-color:var(--red)"><span class="label">Not reachable with these assumptions</span>Even contacting every customer gets you to about <b>${g.kind === "customers" ? NUM(gs.max + levKept) : PKRs(gs.max + levRev)}</b>. Raise the save rate, add operational fixes, or lower the goal.</div>`;
+  const ag = $("#applyGoal"); if (ag) ag.onclick = () => { SIMSET.camp.on = true; SIMSET.camp.n = Math.round(gs.contacted / 100) * 100 || Math.round(gs.contacted); drawCampaign(); recalc(); toast("Campaign audience updated"); };
+}
+function drawSaved() {
+  const all = store.get("scenarios", []).filter(s => s.dataset === (D.dataset && D.dataset.own ? D.dataset.name : "demo"));
+  $("#saved").innerHTML = all.length ? `<div class="tbl-wrap"><table><thead><tr><th>Scenario</th><th>Fixes</th><th class="r">Contacted</th><th class="r">Customers kept</th><th class="r">Revenue / month</th><th class="r">Cost</th><th class="r">Net / month</th><th></th></tr></thead><tbody>${
+    all.map((s, i) => `<tr><td><b>${esc(s.name)}</b><div class="muted" style="font-size:12px">${esc(s.date)}</div></td><td style="max-width:240px">${esc(s.fixes || "None")}</td><td class="r">${NUM(s.contacted)}</td><td class="r">${NUM(s.kept)}</td>
+      <td class="r">${PKRs(s.gain)}</td><td class="r">${PKRs(s.cost)}</td><td class="r" style="color:${s.net >= 0 ? "var(--green)" : "var(--red)"}"><b>${fmtSigned(s.net, PKRs)}</b></td>
+      <td class="r" style="white-space:nowrap"><button class="btn btn-ghost" type="button" data-load="${i}">Load</button><button class="btn btn-ghost" type="button" data-del="${i}">Delete</button></td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="muted" style="padding:16px">Save scenarios to compare options side by side, for example "fix payments only" versus "campaign only".</p>`;
+  $$("[data-load]").forEach(b => b.onclick = () => { const s = all[+b.dataset.load]; Object.assign(SIMSET, JSON.parse(JSON.stringify(s.settings))); drawLevers(); drawCampaign(); drawGoal(); recalc(); toast(`Loaded “${s.name}”`); });
+  $$("[data-del]").forEach(b => b.onclick = () => { const s = all[+b.dataset.del]; store.set("scenarios", store.get("scenarios", []).filter(x => !(x.name === s.name && x.date === s.date && x.dataset === s.dataset))); drawSaved(); });
+}
+async function aSimulator() {
+  try { await ensureSimBase(); } catch (e) { $("#simKpis").innerHTML = `<div class="kpi">Couldn't prepare the simulation: ${esc(e.message)}</div>`; return; }
+  if (!$("#levers")) return;
+  drawLevers(); drawCampaign(); drawGoal(); drawSaved(); compute();
+  $("#simReset").onclick = () => { for (const l of Sim.LEVERS) SIMSET.levers[l.id] = { on: false, value: l.control.def, cost: "" };
+    Object.assign(SIMSET.camp, { on: true, n: Math.max(10, Math.round(Sim.size * 0.1 / (Sim.size >= 10000 ? 100 : 10)) * (Sim.size >= 10000 ? 100 : 10)), save: 0.3, disc: 0.15, take: 0.5 }); drawLevers(); drawCampaign(); recalc(); };
+  $("#simSave").onclick = () => {
+    const name = prompt("Name this scenario", `Scenario ${store.get("scenarios", []).length + 1}`); if (!name || !simLast) return;
+    const r = simLast, fixes = Sim.LEVERS.filter(l => SIMSET.levers[l.id].on).map(l => l.name).join(", ");
+    const list = store.get("scenarios", []);
+    list.push({ name: name.slice(0, 60), date: new Date().toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }),
+      dataset: D.dataset && D.dataset.own ? D.dataset.name : "demo", fixes, contacted: SIMSET.camp.on ? r.campaign.contacted : 0,
+      kept: r.kept, gain: r.gain, cost: r.cost, net: r.net, settings: JSON.parse(JSON.stringify(SIMSET)) });
+    store.set("scenarios", list); drawSaved(); toast(`Saved “${name}”`);
+  };
+}
 // ---------------------------------------------------------------- router
 const ROUTES = {
   "": ["overview", "Overview", pOverview, aOverview], briefing: ["briefing", "Weekly briefing", pBriefing, aBriefing],
   customers: ["customers", "At-risk customers", pCustomers, aCustomers], segments: ["segments", "Segments", pSegments, aSegments],
-  campaigns: ["campaigns", "Campaign planner", pCampaigns, aCampaigns], model: ["model", "Model health", pModel, aModel],
+  simulator: ["simulator", "What-if simulator", pSimulator, aSimulator], campaigns: ["simulator", "What-if simulator", pSimulator, aSimulator],
+  model: ["model", "Model health", pModel, aModel],
   data: ["data", "Data sources", pData, aData], pricing: ["pricing", "Plans & billing", pPricing, aPricing],
 };
 function updateCrumbs(key, extra) {
