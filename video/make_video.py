@@ -45,4 +45,8 @@ def main(OUT=OUT, FINAL=FINAL):
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if sys.argv[1:] == ["5min"]:
+        main(OUT / "5min", HERE / "Churn_Radar_Walkthrough_5min.mp4")
+    else:
+        main()

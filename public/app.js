@@ -911,6 +911,8 @@ function applyToSimulator(st, changedIds = []) {
 function flashLevers(ids) {
   for (const id of ids) { const el = document.querySelector(`[data-lever="${id}"]`); if (el) { el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); } }
   const k = $("#simKpis"); if (k) { k.classList.remove("flash"); void k.offsetWidth; k.classList.add("flash"); }
+  const first = ids.length && document.querySelector(`[data-lever="${ids[0]}"]`);   // bring the changed field into view
+  if (first) first.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 function renderAnswer(m) {
   const v = m.verification, s = v ? v.sentences : []; let i = 0;

@@ -504,6 +504,15 @@ def answer_question(facts, question, history, api_key, allow_scenario=True):
         v = judge_note(v, facts, api_key)
     except Exception as e:
         v["judge_error"] = str(e)[:200]
+    if not allow_scenario and v.get("sentences"):
+        # Explaining computed scenarios: the option cards carry the model's numbers, so a flagged sentence
+        # (e.g. "the facts do not say how to keep 1,000 more") would only contradict them. Drop it.
+        keep = [s for s in v["sentences"] if s.get("ok_final", s["ok"])]
+        if len(keep) < len(v["sentences"]):
+            answer = " ".join(s["sentence"] for s in keep) or "Here are the options, computed by the churn model. Apply any of them to the simulator to explore further."
+            dropped = len(v["sentences"]) - len(keep)
+            v = verify_note({"paragraphs": [answer], "actions": []}, facts, allow_plain=True)
+            v["dropped_unverified"] = dropped
     cost = meta["cost_usd"] + v.get("judge_meta", {}).get("cost_usd", 0)
     return {"answer": answer, "followups": [str(x)[:120] for x in out.get("followups", [])][:3],
             "verification": v, "meta": {**meta, "total_cost_usd": round(cost, 6)}}

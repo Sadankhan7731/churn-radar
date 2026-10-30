@@ -105,8 +105,11 @@ window.__ov = {
     const e = sel && this.find(sel, text);
     if (!e) { if (h) h.remove(); return false; }
     if (!h) { h = document.createElement('div'); h.id = '__hl'; document.body.appendChild(h); }
-    const r = e.getBoundingClientRect(), p = pad == null ? 6 : pad;
-    Object.assign(h.style, { left: (r.left - p) + 'px', top: (r.top - p) + 'px', width: (r.width + 2 * p) + 'px', height: (r.height + 2 * p) + 'px' });
+    const p = pad == null ? 6 : pad, place = () => { const r = e.getBoundingClientRect();
+      Object.assign(h.style, { left: (r.left - p) + 'px', top: (r.top - p) + 'px', width: (r.width + 2 * p) + 'px', height: (r.height + 2 * p) + 'px' }); };
+    place(); this.follow = place;                     // keep the box on its element while the page scrolls
+    if (!this.loop) { this.loop = true; const tick = () => { if (document.getElementById('__hl') && this.follow) this.follow(); requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
+    const r = e.getBoundingClientRect();
     h.innerHTML = label ? '<i>' + label + '</i>' : ''; if (r.top < 40) { const i = h.querySelector('i'); if (i) i.style.top = 'calc(100% + 6px)'; }
     return true; },
   point(sel, text) { this.ensure(); const e = this.find(sel, text); if (!e) return null;
