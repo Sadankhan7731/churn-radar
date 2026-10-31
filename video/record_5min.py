@@ -22,7 +22,7 @@ APP, LIVE_URL = rw.APP, rw.LIVE_URL
 
 # Spoken name: "Saadaan". Typed on screen: "Sadan".
 VO = {
- "intro": "Hi, I'm Saadaan Khan. This is Churn Radar, my Phase 2 project for Use Case A. It predicts which subscribers of a streaming service are likely to cancel next month, and it uses generative AI to explain the risk and help managers decide what to do. Lumen Play is a fictional company, and all figures are illustrative.",
+ "intro": "Hi, I'm Sah-dahn Khan. This is Churn Radar, my Phase 2 project for Use Case A. It predicts which subscribers of a streaming service are likely to cancel next month, and it uses generative AI to explain the risk and help managers decide what to do. Lumen Play is a fictional company, and all figures are illustrative.",
  "ai_map": "AI is used in four ways. A machine learning model scores every subscriber. A language model writes the weekly briefing and answers questions, from aggregate figures only. Every number it writes is checked. And on live data, the model keeps learning.",
  "overview": "The overview shows the model's output: one hundred thousand subscribers scored, about nine thousand likely to cancel, and two point seven six million rupees of monthly revenue at risk.",
  "briefing": "The weekly briefing is written by a language model, from this list of numbered facts, which is the only thing it ever sees.",
