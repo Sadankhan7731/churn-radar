@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Honesty section · Churn Radar</title>
+<style>
+  @page { size: A4; margin: 13mm 14mm; }
+  body { font: 9.6pt/1.42 "Helvetica Neue", Arial, sans-serif; color: #18181b; margin: 0; }
+  h1 { font-size: 15pt; margin: 0 0 1px; letter-spacing: -.01em; }
+  .sub { color: #52525b; font-size: 9pt; margin-bottom: 8px; }
+  h2 { font-size: 10.5pt; margin: 10px 0 3px; color: #c2410c; text-transform: uppercase; letter-spacing: .04em; }
+  ul { margin: 0; padding-left: 15px; } li { margin: 2px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 8.9pt; margin-top: 2px; }
+  th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #e4e4e7; }
+  th { background: #f4f4f5; font-weight: 600; }
+  .miss { color: #b91c1c; font-weight: 600; } .met { color: #15803d; font-weight: 600; }
+  .note { font-size: 8.6pt; color: #52525b; margin-top: 8px; border-top: 1px solid #e4e4e7; padding-top: 5px; }
+</style></head><body>
+<h1>Honesty section — Churn Radar</h1>
+<div class="sub">KSBL DATA722 · Phase 2 · Use Case A (churn prediction with a plain-English weekly summary) · Sadan Khan (M03098sk) · churn-radar-rosy.vercel.app · All data is synthetic; Lumen Play is a fictional company.</div>
+
+<h2>Results against my Phase 1 targets</h2>
+<table>
+  <tr><th>Target</th><th>Goal</th><th>Result</th><th></th><th>Comment</th></tr>
+  <tr><td>Ranking quality (AUC), held-out 30,000 customers</td><td>≥ 0.75</td><td>0.772</td><td class="met">Met</td><td>Boosting (0.780) did not beat it by my 0.01 rule, so the explainable model stays.</td></tr>
+  <tr><td>Hit rate in the top 10% contacted</td><td>≥ 40%</td><td>32.8%</td><td class="miss">Missed</td><td>Even a perfect model reaches only 38.2% on this data: the target was set too high.</td></tr>
+  <tr><td>Calibration, top band</td><td>within 5 pts</td><td>32% vs 33%</td><td class="met">Met</td><td>Predicted and actual churn agree.</td></tr>
+  <tr><td>Briefing control test (planted false statements)</td><td>all caught</td><td>5 / 5</td><td class="met">Met</td><td>Two needed the second AI (meaning) check; code alone caught three.</td></tr>
+  <tr><td>Unsupported claims in the delivered briefing</td><td>&lt; 2%</td><td>0.0%</td><td class="met">Met</td><td>After the number check, the judge, and one repair round.</td></tr>
+</table>
+
+<h2>What the system gets wrong</h2>
+<ul>
+  <li><b>About two in three people on the call list will not actually leave</b> (32.8% hit rate). Offers must be cheap enough for that to be affordable.</li>
+  <li><b>Everything is assumed data.</b> I wrote every signal's effect, the release calendar, the live demo database and its market shift. The work proves the method, not that these signals matter at a real company.</li>
+  <li><b>Reasons are associations, not causes.</b> One true rule (support tickets) was not recovered because of collinearity. The what-if simulator's effects assume risk falls as if a signal changed; that needs an experiment to prove.</li>
+  <li><b>The checks are strong but not perfect.</b> Code cannot judge meaning; the judge is itself a language model and can be wrong or unavailable. Sentences that cannot be verified are shown with a red flag rather than hidden.</li>
+  <li><b>The learning loop is demonstrated on simulated data.</b> Right after retraining, accuracy is measured on the data the model learned from (labelled in the app); a fresh check needs 30 days of outcomes.</li>
+  <li><b>Other companies' uploads are scored with a model trained on Lumen Play's patterns</b>, so their scores are indicative until retrained on their own outcomes.</li>
+</ul>
+
+<h2>What I would not yet put in front of a customer</h2>
+<ul>
+  <li><b>Nothing goes to customers automatically, by design.</b> The tool recommends; a manager approves each outreach and each model switch (auto-promote is off).</li>
+  <li><b>No use on real subscribers</b> until retrained and re-evaluated on real company data, inside the company, with the same held-out test and ceiling check.</li>
+  <li><b>No spending decisions from the simulator alone.</b> Save rates and uptake are assumptions; an A/B test with a holdout group is needed (and would enable uplift and survival models).</li>
+  <li><b>The live connector stays inside the company network.</b> It has no sign-in and binds to the local machine; exposing it would break the Phase 1 rule that customer rows never leave the network.</li>
+</ul>
+
+<h2>What it costs</h2>
+<ul>
+  <li><b>Weekly briefing:</b> about USD 0.001 per memo on average, including the judge and any repair (about PKR 0.30); a few cents a year at one a week. <b>Assistant:</b> about USD 0.0002–0.0006 per question. <b>Learning loop:</b> no LLM cost.</li>
+  <li><b>Hosting:</b> Vercel free tier. <b>LLM:</b> Groq free tier, whose limits (8,000 tokens a minute, 200,000 a day per model) are the real constraint; daily team use would need a paid tier, still cents a day.</li>
+  <li><b>The real cost is the campaign:</b> people's time and discounts. With default assumptions the simulator shows a net monthly benefit for top-10% targeting versus a loss for random targeting.</li>
+</ul>
+
+<div class="note" id="videonote"><b>The walkthrough video uses the same models as the hosted app</b> (gpt-oss-120b for answers, qwen3.8-27b for the meaning check). Waiting time for AI replies is shortened in the edit and marked on screen.</div>
+</body></html>

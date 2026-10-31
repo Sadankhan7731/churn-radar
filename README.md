@@ -3,6 +3,9 @@
 A weekly churn early-warning tool for the retention team of a subscription streaming business.
 Built for **KSBL DATA722 – Generative AI & Strategic Forecasting, Phase 2**. This is Use Case A from the Phase 1 assessment (verdict: *Go, build as scoped*).
 
+* **Live app:** https://churn-radar-rosy.vercel.app
+* **Source code:** https://github.com/Sadankhan7731/churn-radar
+
 > **All subscriber data in this project is synthetic.** No real customer data is used anywhere, as required by the Phase 1 data finding (row 6b).
 
 ## What it does

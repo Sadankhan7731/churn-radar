@@ -10,3 +10,4 @@ __pycache__/
 # Personal documents - not part of the public code
 *.docx
 .claude/
+submission/

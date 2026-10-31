@@ -7,6 +7,7 @@ so the prose can never drift away from the results.
   .venv/bin/python src/build_notebook.py
   .venv/bin/jupyter nbconvert --to notebook --execute --inplace Churn_Radar_Notebook.ipynb
 """
+import phase2_additions as A
 import json
 
 import nbformat as nbf
@@ -62,7 +63,7 @@ This notebook is the working record of Phase 2. It builds **Use Case A** from my
 | 4 | Evaluating the AI memorandum | Evaluation with scores |
 | 5 | Development log: what failed and what I changed | At least one failure |
 | 6 | Tokens and cost | Cost of a representative run |
-| 7 | Honesty section | What it gets wrong, what I would not ship, what it costs |
+{A.OUTLINE_ROWS}
 
 > All subscriber data in this notebook is **synthetic**. No real customer record is used anywhere.
 """)
@@ -327,6 +328,7 @@ These are real problems found while building, in the order they happened.
 | 10 | **One true rule was not recovered** (support tickets). | The rule-recovery table. | Diagnosed as collinearity with ticket sentiment; documented rather than hidden, and flagged in the honesty section. |
 | 11 | **New facts invited new distortions.** With category labels in the facts, the writer described several unrelated reasons as "content-related", and once described waiting fans as having cancelled. | The judge, on live runs. | Added a prompt rule to keep every label as given and never turn "at risk" into "cancelled"; the repair loop fixes the rest. |
 | 12 | **The trap test pointed at fact numbers that moved** when new facts were added. | Reviewing the traps after adding facts. | Facts now carry names (keys) and the traps are built from those keys, so the test stays correct whatever the order. |
+{A.DEVLOG_ROWS}
 
 Failure 2 can be reproduced directly:
 """)
@@ -367,8 +369,9 @@ md("""
 """)
 
 # ---------------------------------------------------------------------------
+md(A.SECTION_7)
 md(f"""
-## 7. Honesty section
+## 8. Honesty section
 
 ### What the system gets wrong
 * **It misses one of my own Phase 1 targets.** Top-10% precision is {pct(R['precision_top10'])} against 40%: about **two in three** people on the call list will *not* actually leave. Offers must be cheap enough that contacting non-leavers is affordable.
@@ -378,15 +381,21 @@ md(f"""
 * **City and device effects are noise the model partly picked up.** They are excluded from the reasons shown but still slightly affect scores.
 * **The checks are good but not perfect.** The number check cannot judge meaning; the judge is itself a language model and can be wrong or unavailable; headlines are not verified. The writer still produces meaning errors on some first drafts, which the repair loop must fix.
 
+{A.HONESTY_WRONG}
+
 ### What I would not yet put in front of a customer
 * **Nothing here goes to customers directly, by design.** The tool recommends; a person decides (Phase 1, row 9a).
 * **I would not use the scores on real subscribers** until the model has been retrained and re-evaluated on real company data, inside the company, with the same held-out test and ceiling check.
 * **I would not let the memo or the suggested actions drive spending on their own.** The actions are templates, and the simulator's save rate and uptake are assumptions. A small A/B test with a holdout group is needed, which would also provide the data for **uplift modelling** (who an offer actually changes) and **survival analysis** (when someone will leave), both future work.
 
+{A.HONESTY_NOT_SHIP}
+
 ### What it cost to run
 * **LLM:** under **USD 0.001** for a memo that passes first time (about PKR 0.20 to 0.30), roughly double when a repair is needed; a few cents a year at one memo a week.
 * **Hosting:** Vercel's free (Hobby) tier. **Groq:** free tier, with real rate limits (failure 5).
 * **The real cost is the retention campaign itself.** With the default assumptions (top 10%, 30% save rate, 15% discount, 50% uptake), the simulator shows a net benefit of about **PKR {SIM_NET:,.0f} a month**, versus a loss if the same number of people were chosen at random.
+{A.HONESTY_COST}
+{A.video_note(A.VIDEO_CHAT_MODEL)}
 """)
 
 nb = nbf.v4.new_notebook()

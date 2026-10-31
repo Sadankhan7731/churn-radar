@@ -1,0 +1,27 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Read me first</title>
+<style>@page{size:A4;margin:14mm} body{font:10pt/1.45 "Helvetica Neue",Arial,sans-serif;color:#18181b;margin:0}
+h1{font-size:16pt;margin:0 0 2px} .sub{color:#52525b;margin-bottom:10px} h2{font-size:10.5pt;margin:12px 0 4px;color:#c2410c;text-transform:uppercase;letter-spacing:.04em}
+table{border-collapse:collapse;width:100%;font-size:9.4pt} td,th{padding:4px 6px;border-bottom:1px solid #e4e4e7;text-align:left;vertical-align:top} th{background:#f4f4f5}
+a{color:#c2410c} ul{margin:0;padding-left:16px} li{margin:2px 0} code{font-size:9pt;background:#f4f4f5;padding:0 3px}</style></head><body>
+<h1>Churn Radar — Phase 2 submission</h1>
+<div class="sub">KSBL DATA722 Generative AI &amp; Strategic Forecasting · Use Case A · Sadan Khan (M03098sk)</div>
+<h2>Links</h2>
+<table><tr><td><b>Live app (hosted on Vercel)</b></td><td><a href="https://churn-radar-rosy.vercel.app">https://churn-radar-rosy.vercel.app</a></td></tr>
+<tr><td><b>Source code (GitHub)</b></td><td><a href="https://github.com/Sadankhan7731/churn-radar">https://github.com/Sadankhan7731/churn-radar</a></td></tr></table>
+<h2>What is in this folder</h2>
+<table><tr><th>File</th><th>Brief requirement</th><th>What it contains</th></tr>
+<tr><td>01_Churn_Radar_Notebook.ipynb</td><td>Notebook</td><td>Data, model and evaluation against Phase 1 targets, prompts and the agent loop (writer, number check, judge, repair), scored evaluation of the AI briefing, development log of 24 real failures, tokens and cost, features added later, honesty section. Outputs are from real runs.</td></tr>
+<tr><td>02_Churn_Radar_Notebook.html</td><td>Notebook (readable copy)</td><td>The same notebook, opens in any browser without Python.</td></tr>
+<tr><td>03_Churn_Radar_Walkthrough.mp4</td><td>5-minute video</td><td>4 min 36 s narrated walkthrough with captions and highlights: predictions, the AI briefing and its checks, the at-risk list, the what-if simulator, the assistant operating the simulator, the guardrail test, results against targets, the live database and the learning loop.</td></tr>
+<tr><td>04_Honesty_Section.pdf</td><td>One-page honesty section</td><td>Results against Phase 1 targets (one missed, explained), what it gets wrong, what I would not ship, what it costs.</td></tr>
+<tr><td>05_source_code/</td><td>Hosted app</td><td>Everything deployed to Vercel plus the data generator, model training, the live database connector and the video recorder. No API keys or customer data.</td></tr></table>
+<h2>How AI is used</h2>
+<ul><li><b>Prediction:</b> a logistic regression scores 100,000 synthetic subscribers from 40 signals (AUC 0.772).</li>
+<li><b>Language:</b> <code>gpt-oss-120b</code> writes the weekly briefing and answers questions from aggregate facts only; it chooses what-if scenarios, which the churn model computes.</li>
+<li><b>Control:</b> every figure is checked in code; <code>qwen3.8-27b</code> checks meaning; flagged sentences go back for repair; five planted errors test the checks.</li>
+<li><b>Learning:</b> on a live database, the model is checked against real cancellations, drift is measured, and a retrained challenger replaces it only after a person approves.</li></ul>
+<h2>Running it locally (optional)</h2>
+<ul><li>Python 3.9+: <code>pip install -r requirements-dev.txt</code>, put a Groq key in <code>.env</code> as <code>GROQ_API_KEY=...</code>, then <code>python src/serve.py</code> and open <code>http://localhost:8000</code>.</li>
+<li>Live database demo: see <code>connector/README.md</code> (three commands: build the demo database, start the platform simulator, start the connector).</li></ul>
+<p style="color:#52525b;font-size:9pt;margin-top:12px">All data is synthetic; Lumen Play is a fictional company. Customer rows never leave the device or network; the AI receives aggregate figures only.</p>
+</body></html>

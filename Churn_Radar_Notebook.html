@@ -7846,6 +7846,11 @@ a.anchor-link {
 </tr>
 <tr>
 <td>7</td>
+<td>Added after the first build: own data, what-if simulator, assistant, live database, learning loop</td>
+<td>Beyond the brief; how AI is used in each</td>
+</tr>
+<tr>
+<td>8</td>
 <td>Honesty section</td>
 <td>What it gets wrong, what I would not ship, what it costs</td>
 </tr>
@@ -9625,6 +9630,78 @@ Unsupported after both checks and repair: 0 = 0.0%  (target &lt; 2%)
 <td>Reviewing the traps after adding facts.</td>
 <td>Facts now carry names (keys) and the traps are built from those keys, so the test stays correct whatever the order.</td>
 </tr>
+<tr>
+<td>13</td>
+<td><strong>The chat failed with "invalid JSON"</strong> on the live site.</td>
+<td>A user screenshot.</td>
+<td>More room for the answer, one retry, rescue of partial replies, and a friendly error instead of a crash.</td>
+</tr>
+<tr>
+<td>14</td>
+<td><strong>The number check flagged correct figures</strong> written as "2.76 million", and list numbers like "1."</td>
+<td>Live chat answers.</td>
+<td>The checker now understands scaled numbers (million, M, k) and ignores list numbering, with the same rule in the browser and on the server.</td>
+</tr>
+<tr>
+<td>15</td>
+<td><strong>The assistant did its own maths for what-if questions</strong> ("if we achieve 5% of that?") and answered in prose.</td>
+<td>A user test.</td>
+<td>Gave it a scenario tool: the language model only chooses the levers; the browser computes the result with the churn model; the language model then explains the computed numbers.</td>
+</tr>
+<tr>
+<td>16</td>
+<td><strong>"Keep 1,000 more customers" was read as a total of 1,000.</strong></td>
+<td>A user test.</td>
+<td>Goals now carry a "more" flag.</td>
+</tr>
+<tr>
+<td>17</td>
+<td><strong>The confirmation after "apply it" hit the rate limit</strong> (HTTP 502).</td>
+<td>A user test.</td>
+<td>The confirmation is now written by the app from what actually changed: no AI call, so it cannot misreport.</td>
+</tr>
+<tr>
+<td>18</td>
+<td><strong>Two copies of the demo platform simulator crashed</strong> with duplicate customer IDs.</td>
+<td>The error in my terminal.</td>
+<td>IDs are read from the database at sign-up time, and a lock file allows only one simulator.</td>
+</tr>
+<tr>
+<td>19</td>
+<td><strong>The original model's real accuracy fell to AUC about 0.60</strong> after a simulated market shift on the live database.</td>
+<td>The learning loop's realised-accuracy check.</td>
+<td>Retrain a challenger on the latest 30-day outcomes (AUC about 0.72 to 0.76 on customers it never saw); switch only after a person approves.</td>
+</tr>
+<tr>
+<td>20</td>
+<td><strong>The hosted site could not reach a local connector</strong> in some browsers (public site to localhost is blocked).</td>
+<td>Testing in a second browser.</td>
+<td>Added an "allow local network" hint, and documented that the connector belongs inside the company network.</td>
+</tr>
+<tr>
+<td>21</td>
+<td><strong>Groq's daily token limit</strong> (200,000 tokens a day for <code>gpt-oss-120b</code>) ran out while recording the video; every chat answer failed.</td>
+<td>The recorder's own checks, then the server log (HTTP 429, tokens per day).</td>
+<td>Paced the questions and retried; documented the limit (see the honesty section).</td>
+</tr>
+<tr>
+<td>22</td>
+<td><strong><code>gpt-oss-20b</code> sometimes returned its JSON as a "tool call"</strong>, which Groq rejects (HTTP 400).</td>
+<td>Replaying the exact request the browser sent.</td>
+<td>The JSON is recovered from the error itself; otherwise the call is retried.</td>
+</tr>
+<tr>
+<td>23</td>
+<td><strong>An explanation opened with a sentence that contradicted the computed options</strong> ("the facts do not provide a clear answer").</td>
+<td>Frame-by-frame review of the video.</td>
+<td>When explaining computed scenarios, sentences that fail verification are dropped; the option cards carry the model's numbers.</td>
+</tr>
+<tr>
+<td>24</td>
+<td><strong>Failed retries piled up error messages in the chat</strong>, and auto-sync reloaded Model health every 30 seconds.</td>
+<td>Video review.</td>
+<td>"Try again" now replaces the failed exchange, and Model health no longer reloads on sync.</td>
+</tr>
 </tbody>
 </table>
 <p>Failure 2 can be reproduced directly:</p>
@@ -9792,29 +9869,108 @@ Even regenerating 100 times a day for a month: $3.24
 </div>
 </div>
 </div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=af7a6466">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<h2 id="7.-Added-after-the-first-build">7. Added after the first build<a class="anchor-link" href="#7.-Added-after-the-first-build">¶</a></h2><p>The first version was a dashboard with a weekly memo. After feedback ("make it something people can use, not just read"), I extended it into a small product. The machine-learning model and the checking rules stayed the same; what changed is <strong>where</strong> the AI is used.</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>What it does</th>
+<th>Where AI is used</th>
+<th>How it is kept honest</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Bring your own data</strong></td>
+<td>Upload a CSV or Excel file, link a Google Sheet, or connect a database. Columns are matched to the 40 signals automatically.</td>
+<td>The churn model scores every row <strong>in the browser</strong> (identical maths to Python, checked to 6 decimal places).</td>
+<td>Customer rows never leave the device; the AI only receives aggregate figures, as in Phase 1.</td>
+</tr>
+<tr>
+<td><strong>What-if simulator</strong></td>
+<td>Switch on fixes (failed payments, video start, buffering, support, content, engagement, plan) or a retention campaign; every customer is re-scored. A goal planner works out what a target would need.</td>
+<td>The churn model, re-applied to all customers.</td>
+<td>Each lever is a stated assumption (a shift in the model's log-odds); results are labelled estimates.</td>
+</tr>
+<tr>
+<td><strong>Assistant that operates the simulator</strong></td>
+<td>Ask in plain English ("what are my options to keep 1,000 more customers?", "set failed payments to 20%"). It proposes options as cards, and applies them to the simulator on request.</td>
+<td>The language model chooses which scenarios to try; <strong>the churn model computes them</strong>; the language model explains the computed numbers.</td>
+<td>Numbers are verified against the facts; the apply confirmation is written by the app; the assistant never sees personal data.</td>
+</tr>
+<tr>
+<td><strong>Live database</strong></td>
+<td>A connector next to the company database (SQL Server, or the SQLite demo) turns raw viewing, billing and support events into the 40 signals. The app syncs every 30 seconds.</td>
+<td>The model scores live customers in the browser.</td>
+<td>The connector runs inside the company network and binds to the local machine only. The demo database is filled by a platform simulator I wrote.</td>
+</tr>
+<tr>
+<td><strong>Learning loop</strong></td>
+<td>Rebuilds what was known 30 days ago, compares it with who actually cancelled, measures drift (PSI), trains a challenger, and compares it with the live model on customers neither has seen.</td>
+<td>Retraining the logistic regression on the latest outcomes.</td>
+<td>A challenger must beat the live model's AUC by at least 0.01, and <strong>a person approves the switch</strong> (auto-promote is off by default).</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Evidence from the walkthrough recording.</strong> The video was recorded by a script that also checked, on the page, that each thing the narration claims actually happened: the toggle re-scored customers (6,588 to 6,402 expected cancellations), applying an option changed a lever and the forecast (6,402 to 5,587), a typed instruction changed the simulator, the guardrail question was refused, drift was visible after the market shift, and the approved model went live. A take that failed any check was discarded and re-recorded.</p>
+</div>
+</div>
+</div>
+</div>
 <div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=326b24d1">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="7.-Honesty-section">7. Honesty section<a class="anchor-link" href="#7.-Honesty-section">¶</a></h2><h3 id="What-the-system-gets-wrong">What the system gets wrong<a class="anchor-link" href="#What-the-system-gets-wrong">¶</a></h3><ul>
-<li><strong>It misses one of my own Phase 1 targets.</strong> Top-10% precision is 32.8% against 40%: about <strong>two in three</strong> people on the call list will <em>not</em> actually leave. Offers must be cheap enough that contacting non-leavers is affordable.</li>
-<li><strong>The 40% target was a Phase 1 mistake.</strong> I set it before checking what is achievable at a 9% base rate. Even a perfect model reaches 38.2% here.</li>
-<li><strong>Everything in the data is assumed.</strong> I wrote the effect of every signal, including the release calendar. The model's improvement from version 1 to version 2 proves the method, not that these signals matter at my company.</li>
-<li><strong>Reasons are associations, not causes.</strong> "Watch time down 41%" travels with churn; it does not prove that more content would keep that person. One true rule (support tickets) was not recovered because of collinearity, a reminder not to read coefficients as causes.</li>
-<li><strong>City and device effects are noise the model partly picked up.</strong> They are excluded from the reasons shown but still slightly affect scores.</li>
-<li><strong>The checks are good but not perfect.</strong> The number check cannot judge meaning; the judge is itself a language model and can be wrong or unavailable; headlines are not verified. The writer still produces meaning errors on some first drafts, which the repair loop must fix.</li>
+<h2 id="8.-Honesty-section">8. Honesty section<a class="anchor-link" href="#8.-Honesty-section">¶</a></h2><h3 id="What-the-system-gets-wrong">What the system gets wrong<a class="anchor-link" href="#What-the-system-gets-wrong">¶</a></h3><ul>
+<li><p><strong>It misses one of my own Phase 1 targets.</strong> Top-10% precision is 32.8% against 40%: about <strong>two in three</strong> people on the call list will <em>not</em> actually leave. Offers must be cheap enough that contacting non-leavers is affordable.</p>
+</li>
+<li><p><strong>The 40% target was a Phase 1 mistake.</strong> I set it before checking what is achievable at a 9% base rate. Even a perfect model reaches 38.2% here.</p>
+</li>
+<li><p><strong>Everything in the data is assumed.</strong> I wrote the effect of every signal, including the release calendar. The model's improvement from version 1 to version 2 proves the method, not that these signals matter at my company.</p>
+</li>
+<li><p><strong>Reasons are associations, not causes.</strong> "Watch time down 41%" travels with churn; it does not prove that more content would keep that person. One true rule (support tickets) was not recovered because of collinearity, a reminder not to read coefficients as causes.</p>
+</li>
+<li><p><strong>City and device effects are noise the model partly picked up.</strong> They are excluded from the reasons shown but still slightly affect scores.</p>
+</li>
+<li><p><strong>The checks are good but not perfect.</strong> The number check cannot judge meaning; the judge is itself a language model and can be wrong or unavailable; headlines are not verified. The writer still produces meaning errors on some first drafts, which the repair loop must fix.</p>
+</li>
+<li><p><strong>The live demo is simulated too.</strong> I wrote the demo database, the market shift and its effects. The learning loop proves the mechanism (detect drift, retrain, test on unseen customers, ask a person), not real-world accuracy. Real accuracy can only be measured 30 days after scoring; right after retraining, the accuracy shown is measured on the data the model learned from, and the app labels it that way.</p>
+</li>
+<li><p><strong>The simulator's effects are assumptions on an associational model.</strong> "Cut buffering by 50%" assumes risk falls as if the signal had changed. That is not proven cause and effect; it needs an experiment.</p>
+</li>
+<li><p><strong>Other companies' data is scored with a model trained on Lumen Play's patterns.</strong> Column matching makes it run, but the scores are indicative until the model is retrained on that company's own outcomes (which the learning loop does for a live database).</p>
+</li>
+<li><p><strong>The assistant can still word things badly.</strong> Its numbers are computed and checked, but a sentence that cannot be verified is shown with a red flag (or dropped from option explanations). A refusal with no figures is flagged "couldn't be verified": strict, not wrong.</p>
+</li>
 </ul>
 <h3 id="What-I-would-not-yet-put-in-front-of-a-customer">What I would not yet put in front of a customer<a class="anchor-link" href="#What-I-would-not-yet-put-in-front-of-a-customer">¶</a></h3><ul>
-<li><strong>Nothing here goes to customers directly, by design.</strong> The tool recommends; a person decides (Phase 1, row 9a).</li>
-<li><strong>I would not use the scores on real subscribers</strong> until the model has been retrained and re-evaluated on real company data, inside the company, with the same held-out test and ceiling check.</li>
-<li><strong>I would not let the memo or the suggested actions drive spending on their own.</strong> The actions are templates, and the simulator's save rate and uptake are assumptions. A small A/B test with a holdout group is needed, which would also provide the data for <strong>uplift modelling</strong> (who an offer actually changes) and <strong>survival analysis</strong> (when someone will leave), both future work.</li>
+<li><p><strong>Nothing here goes to customers directly, by design.</strong> The tool recommends; a person decides (Phase 1, row 9a).</p>
+</li>
+<li><p><strong>I would not use the scores on real subscribers</strong> until the model has been retrained and re-evaluated on real company data, inside the company, with the same held-out test and ceiling check.</p>
+</li>
+<li><p><strong>I would not let the memo or the suggested actions drive spending on their own.</strong> The actions are templates, and the simulator's save rate and uptake are assumptions. A small A/B test with a holdout group is needed, which would also provide the data for <strong>uplift modelling</strong> (who an offer actually changes) and <strong>survival analysis</strong> (when someone will leave), both future work.</p>
+</li>
+<li><p><strong>I would not expose the live connector to the internet.</strong> It binds to the local machine and has no sign-in; a real deployment needs it inside the company network with TLS and access control. This is also why the hosted site cannot show live data to outside visitors.</p>
+</li>
+<li><p><strong>I would not switch on auto-promote</strong> for retrained models without a track record; a person approves each switch.</p>
+</li>
 </ul>
 <h3 id="What-it-cost-to-run">What it cost to run<a class="anchor-link" href="#What-it-cost-to-run">¶</a></h3><ul>
 <li><strong>LLM:</strong> under <strong>USD 0.001</strong> for a memo that passes first time (about PKR 0.20 to 0.30), roughly double when a repair is needed; a few cents a year at one memo a week.</li>
 <li><strong>Hosting:</strong> Vercel's free (Hobby) tier. <strong>Groq:</strong> free tier, with real rate limits (failure 5).</li>
 <li><strong>The real cost is the retention campaign itself.</strong> With the default assumptions (top 10%, 30% save rate, 15% discount, 50% uptake), the simulator shows a net benefit of about <strong>PKR 120,984 a month</strong>, versus a loss if the same number of people were chosen at random.</li>
+<li><strong>Assistant:</strong> about USD 0.0002 to 0.0006 per question (shown under every answer); a what-if question uses two calls (choose scenarios, then explain the computed results).</li>
+<li><strong>Learning loop:</strong> no LLM cost; retraining the logistic regression takes seconds on a laptop.</li>
+<li><strong>Free-tier limits are the real constraint:</strong> 8,000 tokens a minute and 200,000 a day per model on Groq. Recording the video used up the daily limit for <code>gpt-oss-120b</code> (failure 21). A team using this daily would need a paid tier, at a cost still measured in cents a day.</li>
+<li><strong>The walkthrough video uses the same models as the hosted app</strong> (<code>gpt-oss-120b</code> for answers, <code>qwen3.8-27b</code> for the meaning check). Waiting time for AI replies is shortened in the edit and marked on screen.</li>
 </ul>
 </div>
 </div>
