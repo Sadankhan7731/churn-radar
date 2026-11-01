@@ -394,3 +394,11 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 .candidate { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--r-lg); padding: 14px; background: var(--panel-2); }
 .candidate.good { border-color: var(--green); box-shadow: 0 0 0 1px var(--green-soft); }
 .cand-h { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- control test: the planted statements ---------- */
+.traps { margin-top: 6px; }
+.traps summary { cursor: pointer; color: var(--accent, #c2410c); font-size: 12.5px; font-weight: 500; }
+.traps ol { margin: 8px 0 2px; padding-left: 18px; }
+.traps li { display: list-item; border: 0; padding: 0 0 8px; font-size: 12.5px; }
+.traps q { display: block; color: var(--text); font-style: italic; }
+.traps .trap-by { display: block; color: var(--text-3); font-size: 12px; margin-top: 2px; }

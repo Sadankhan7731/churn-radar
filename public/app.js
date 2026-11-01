@@ -292,7 +292,9 @@ function aBriefing() {
     <li><span class="tick ${v.flagged ? "x" : ""}">${v.flagged ? "!" : "✓"}</span><div><b>Figures check</b><span>${v.total - v.flagged} of ${v.total} statements cite a real figure and use only its numbers.</span></div></li>
     <li><span class="tick ${j && faithful < v.total ? "x" : ""}">${j ? (faithful === v.total ? "✓" : "!") : "–"}</span><div><b>Meaning check</b><span>${j ? `${faithful} of ${v.total} confirmed faithful by an independent model (${esc(j.model)}).` : "Not available on this run."}</span></div></li>
     <li><span class="tick">✓</span><div><b>Self-correction</b><span>${drafts > 1 ? "Flagged statements were returned to the writer and fixed." : "Accepted on the first draft."}</span></div></li>
-    ${t && t.details ? `<li><span class="tick">✓</span><div><b>Control test</b><span>${t.caught_both} of ${t.planted} planted false statements caught.</span></div></li>` : ""}`;
+    ${t && t.details ? `<li><span class="tick">✓</span><div><b>Control test</b><span>${t.caught_both} of ${t.planted} planted false statements caught.</span>
+      <details class="traps"><summary>Show the planted statements</summary><ol>${t.details.map(d => `<li><q>${esc(d.sentence.replace(/\s*\[F[\d,\sF]+\]$/, ""))}</q>
+        <span class="trap-by">${d.numbers_caught ? "Caught by the figures check" : `Numbers were correct — caught only by the meaning check (${esc(d.judge)})`}: ${esc(d.why)}</span></li>`).join("")}</ol></details></div></li>` : ""}`;
   $("#facts").innerHTML = FACTS.map(f => `<li>${esc(f.text)}</li>`).join("");
   const total = m.total_cost_usd ?? m.cost_usd;
   $("#run").innerHTML = [["Writer", live ? esc(m.model) : "Template"], ["Reviewer", j ? esc(j.model) : "—"], ["Tokens", live ? `${NUM(m.input_tokens + (j ? j.input_tokens : 0))} in · ${NUM(m.output_tokens + (j ? j.output_tokens : 0))} out` : "—"],
